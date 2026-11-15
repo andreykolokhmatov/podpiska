@@ -328,3 +328,14 @@ html * {
     animation-duration: 2.4s;
   }
 }
+
+.pd-nowrap {
+  white-space: nowrap;
+}
+
+.pd-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}

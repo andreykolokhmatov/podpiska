@@ -148,6 +148,6 @@ export const t = {
     emptyTitle: 'Выпусков пока нет',
     emptyText: 'Соберите первый выпуск на главной – он появится здесь.',
   },
-  issueTitle: (number: number) => `Выпуск № ${number}`,
+  issueTitle: (number: number) => `Выпуск №\u00A0${number}`,
   issueMeta: (number: number, dateline: string) => `№ ${number} · ${dateline}`,
 } as const;
