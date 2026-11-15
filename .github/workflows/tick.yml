@@ -22,12 +22,21 @@ jobs:
           APP_URL: ${{ secrets.APP_URL }}
         run: |
           set -euo pipefail
+          # Pasted secrets may carry a trailing newline or spaces.
+          CRON_SECRET="$(printf '%s' "${CRON_SECRET}" | tr -d '[:space:]')"
+          APP_URL="$(printf '%s' "${APP_URL}" | tr -d '[:space:]')"
           if [ -z "${CRON_SECRET}" ] || [ -z "${APP_URL}" ]; then
             echo "::error::Repository secrets CRON_SECRET and APP_URL must be set"
             exit 1
           fi
+          # On 401 the server answers with the first 8 hex chars of its secret's SHA-256: compare.
+          echo "local secret fingerprint: $(printf '%s' "${CRON_SECRET}" | sha256sum | cut -c1-8)"
           curl --fail-with-body --silent --show-error --max-time 60 \
+            -D headers.txt \
             -X POST \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${APP_URL%/}/api/cron/tick"
+            "${APP_URL%/}/api/cron/tick" || {
+            grep -i '^x-cron-secret-fingerprint' headers.txt || true
+            exit 1
+          }
           echo

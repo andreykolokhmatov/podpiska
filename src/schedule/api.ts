@@ -82,8 +82,15 @@ export function bearerMatches(header: string | null, secret: string): boolean {
   return timingSafeEqual(digest(match[1]), digest(secret));
 }
 
+/** First 8 hex chars of the secret's SHA-256: compares two copies without revealing either. */
+export const secretFingerprint = (secret: string): string =>
+  digest(secret).toString('hex').slice(0, 8);
+
 class Unauthorized extends Error {
   override readonly name = 'Unauthorized';
+  constructor(readonly fingerprint: string) {
+    super('unauthorized');
+  }
 }
 
 class BadRequest extends Error {
@@ -93,7 +100,9 @@ class BadRequest extends Error {
 export function createCronApi(deps: CronApiDeps): CronApi {
   const authorize = (req: Request): CronEnv => {
     const env = deps.env();
-    if (!bearerMatches(req.headers.get('authorization'), env.CRON_SECRET)) throw new Unauthorized();
+    if (!bearerMatches(req.headers.get('authorization'), env.CRON_SECRET)) {
+      throw new Unauthorized(secretFingerprint(env.CRON_SECRET));
+    }
     return env;
   };
 
@@ -103,7 +112,11 @@ export function createCronApi(deps: CronApiDeps): CronApi {
       try {
         return await fn(req);
       } catch (error) {
-        if (error instanceof Unauthorized) return json(401, { error: 'unauthorized' });
+        if (error instanceof Unauthorized) {
+          const res = json(401, { error: 'unauthorized' });
+          res.headers.set('X-Cron-Secret-Fingerprint', error.fingerprint);
+          return res;
+        }
         if (error instanceof BadRequest) return json(400, { error: 'bad_request' });
         if (error instanceof EnvError) {
           // EnvError messages list keys and reasons only, never values.

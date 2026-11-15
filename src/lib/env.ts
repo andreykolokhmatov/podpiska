@@ -265,8 +265,10 @@ export function getPdfEnv(source: EnvSource = process.env): PdfEnv {
 
 const cronEnvSchema = z.object({
   // Bearer secret of /api/cron/*; never optional, so the endpoints can never be open.
+  // Trimmed: a value pasted from a terminal often carries a trailing newline, which made the
+  // dashboard value and the GitHub secret look equal while never matching.
   CRON_SECRET: requiredString('is required').pipe(
-    z.string().min(32, 'must be at least 32 chars (openssl rand -hex 32)'),
+    z.string().trim().min(32, 'must be at least 32 chars (openssl rand -hex 32)'),
   ),
   APP_URL: botShape.APP_URL,
   TELEGRAM_BOT_TOKEN: telegramBotToken,
