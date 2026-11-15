@@ -38,7 +38,7 @@ describe('quota', () => {
 });
 
 describe('countsTowardQuota', () => {
-  it.each(['no_channels: x', 'no_posts: x', 'collect_failed: x'])(
+  it.each(['no_channels: x', 'no_posts: x', 'collect_failed: x', 'no_news: x'])(
     'excludes the free failure %s',
     (error) => {
       expect(countsTowardQuota({ status: 'failed', error })).toBe(false);
@@ -98,6 +98,20 @@ describe('issueState', () => {
       progress: null,
     });
     expect(issueState(row({ status: 'digesting' }), now).status).toBe('digesting');
+  });
+
+  it('exposes what was read only for no_news', () => {
+    const stats = { messages: 3, channels: 1, collect: {} };
+    expect(issueState(row({ status: 'failed', error: 'no_news: x', stats }), now).found).toEqual({
+      posts: 3,
+      channels: 1,
+    });
+    expect(issueState(row({ status: 'failed', error: 'no_news: x' }), now)).not.toHaveProperty(
+      'found',
+    );
+    expect(
+      issueState(row({ status: 'failed', error: 'digest_failed: x', stats }), now),
+    ).not.toHaveProperty('found');
   });
 
   it('exposes number only when ready and error only when failed', () => {

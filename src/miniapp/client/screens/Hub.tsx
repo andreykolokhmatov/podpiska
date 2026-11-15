@@ -51,7 +51,7 @@ export function Hub({ data }: HubProps) {
   });
 
   const issueFooter = channelCount === 0 ? t.hub.needChannels : quotaText(quota);
-  const status = <BuildStatus state={state} />;
+  const status = <BuildStatus state={state} channelCount={channelCount} />;
 
   return (
     <main className="pd-page">
@@ -145,7 +145,7 @@ export function Hub({ data }: HubProps) {
   );
 }
 
-function BuildStatus({ state }: { state: BuildState }) {
+function BuildStatus({ state, channelCount }: { state: BuildState; channelCount: number }) {
   switch (state.kind) {
     case 'starting':
     case 'polling':
@@ -182,7 +182,7 @@ function BuildStatus({ state }: { state: BuildState }) {
         <Cell
           Component="div"
           before={<ColorIcon icon={CircleAlert} color="red" />}
-          subtitle={failureText(state.failure)}
+          subtitle={failureText(state.failure, channelCount)}
           multiline
         >
           {t.hub.failedTitle}

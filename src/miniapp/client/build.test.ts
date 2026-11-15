@@ -232,7 +232,17 @@ describe('quotaText', () => {
 
 describe('failureText', () => {
   it('uses issue and api copy', () => {
-    expect(failureText({ source: 'issue', code: 'no_posts' })).toBe(issueErrorText.no_posts);
-    expect(failureText({ source: 'api', code: 'limit' })).toMatch(/3 в день/);
+    expect(failureText({ source: 'issue', code: 'no_posts' }, 2)).toBe(issueErrorText.no_posts);
+    expect(failureText({ source: 'api', code: 'limit' }, 2)).toMatch(/3 в день/);
+  });
+
+  it('names what was read for no_news and says the try is free', () => {
+    const text = (found: { posts: number; channels: number }, channels: number) =>
+      failureText({ source: 'issue', code: 'no_news', found }, channels);
+    expect(text({ posts: 3, channels: 1 }, 2)).toBe(
+      '3 поста за сутки в 1 из 2 каналов – и ни одной новости: только личные заметки, репосты или мемы. Добавьте каналы, где пишут новости. Попытка не засчитана.',
+    );
+    expect(text({ posts: 1, channels: 2 }, 2)).toMatch(/^1 пост за сутки в ваших каналах/);
+    expect(failureText({ source: 'issue', code: 'no_news' }, 2)).toBe(issueErrorText.no_news);
   });
 });

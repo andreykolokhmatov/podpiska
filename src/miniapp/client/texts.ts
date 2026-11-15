@@ -39,22 +39,44 @@ export function errorText(code: ClientErrorCode, limit?: number): string {
   return apiErrorText[code];
 }
 
+const notCounted = 'Попытка не засчитана.';
+
 export const issueErrorText: Record<IssueErrorCode, string> = {
   no_channels: 'В подписке нет каналов – добавьте хотя бы один.',
-  no_posts: 'В ваших каналах не нашлось новых постов за последние сутки.',
-  collect_failed: 'Не получилось прочитать каналы: Telegram не ответил. Попробуйте позже.',
+  no_posts: `В ваших каналах не было постов за последние сутки. ${notCounted}`,
+  collect_failed: `Не получилось прочитать каналы: Telegram не ответил. Попробуйте позже. ${notCounted}`,
   digest_failed: 'Редакция не смогла прочитать каналы. Попробуйте ещё раз.',
-  no_news: 'За сутки не нашлось ничего по вашим интересам.',
+  no_news: `Посты за сутки есть, но новостей среди них нет – только личные заметки, репосты или мемы. Добавьте каналы, где пишут новости. ${notCounted}`,
   timeout: 'Сборка заняла слишком много времени. Попробуйте ещё раз.',
   internal: 'Что-то пошло не так при сборке. Попробуйте ещё раз.',
 };
 
-function pluralIssues(n: number): string {
+function plural(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'выпуск';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'выпуска';
-  return 'выпусков';
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+const pluralIssues = (n: number) => plural(n, 'выпуск', 'выпуска', 'выпусков');
+
+/**
+ * no_news names what was read, so the reader sees the channels are the problem (digests do not
+ * depend on interests). "в 1 из 2 каналов" also tells that the other channel was silent.
+ */
+export function issueFailureText(
+  code: IssueErrorCode,
+  found: { posts: number; channels: number } | undefined,
+  channelCount: number,
+): string {
+  if (code !== 'no_news' || !found || found.posts === 0) return issueErrorText[code];
+  const where =
+    found.channels < channelCount
+      ? `в ${found.channels} из ${channelCount} ${plural(channelCount, 'канала', 'каналов', 'каналов')}`
+      : 'в ваших каналах';
+  const posts = `${found.posts.toString()} ${plural(found.posts, 'пост', 'поста', 'постов')}`;
+  return `${posts} за сутки ${where} – и ни одной новости: только личные заметки, репосты или мемы. Добавьте каналы, где пишут новости. ${notCounted}`;
 }
 
 export const t = {

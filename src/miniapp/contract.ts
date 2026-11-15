@@ -116,6 +116,8 @@ export const issueStateSchema = z.object({
   error: z.enum(issueErrorCodes).nullable(),
   /** Non-null only when ready. Open `/issue/<id>?tma=1&theme=<light|dark>`. */
   number: z.number().int().nullable(),
+  /** Only for failed/no_news: what the editors read before finding nothing newsworthy. */
+  found: z.object({ posts: z.number().int(), channels: z.number().int() }).optional(),
 });
 export type IssueState = z.infer<typeof issueStateSchema>;
 

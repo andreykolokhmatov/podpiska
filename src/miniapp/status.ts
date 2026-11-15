@@ -23,11 +23,15 @@ const IN_FLIGHT: ReadonlySet<IssueStatus> = new Set([
 
 export const isInFlight = (status: IssueStatus): boolean => IN_FLIGHT.has(status);
 
-/** Failures that cost no LLM money: they do not use up the daily quota. */
+/**
+ * Failures that do not use up the daily quota: they cost no LLM money, or (no_news) a retry
+ * would reuse the cached digests and never reach compose.
+ */
 export const QUOTA_EXEMPT_CODES: readonly IssueErrorCode[] = [
   'no_channels',
   'no_posts',
   'collect_failed',
+  'no_news',
 ];
 
 const KNOWN_CODES: ReadonlySet<string> = new Set(issueErrorCodes);
@@ -46,6 +50,15 @@ export interface IssueStateRow {
   digestsDone: number;
   digestsTotal: number;
   createdAt: Date;
+  /** issues.stats_json (IssueStats); only read for failures. */
+  stats?: unknown;
+}
+
+function foundOf(stats: unknown): IssueState['found'] {
+  if (typeof stats !== 'object' || stats === null) return undefined;
+  const { messages, channels } = stats as Record<string, unknown>;
+  if (typeof messages !== 'number' || typeof channels !== 'number') return undefined;
+  return { posts: messages, channels };
 }
 
 export const isStale = (row: Pick<IssueStateRow, 'status' | 'createdAt'>, now: Date): boolean =>
@@ -70,12 +83,15 @@ export function issueState(row: IssueStateRow, now: Date): IssueState {
   if (isStale(row, now)) {
     return { id: row.id, status: 'failed', progress: null, error: 'timeout', number: null };
   }
+  const error = row.status === 'failed' ? errorCode(row.error) : null;
+  const found = error === 'no_news' ? foundOf(row.stats) : undefined;
   return {
     id: row.id,
     status: row.status,
     progress: progressOf(row),
-    error: row.status === 'failed' ? errorCode(row.error) : null,
+    error,
     number: row.status === 'ready' ? row.number : null,
+    ...(found ? { found } : {}),
   };
 }
 

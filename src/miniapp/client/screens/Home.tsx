@@ -8,6 +8,8 @@ import {
   type MeResponse,
 } from '@/miniapp/contract';
 
+import { useEffect } from 'react';
+
 import { apiFetch, type ApiResult } from '../api';
 import { useApi } from '../useApi';
 import { Hub } from './Hub';
@@ -38,7 +40,19 @@ async function loadHome(): Promise<ApiResult<HomeData>> {
 }
 
 export function Home() {
-  const { resource, reload, setData } = useApi(loadHome);
+  const { resource, loaded, refresh, reload, setData } = useApi(loadHome);
+
+  // Back from the newspaper may restore the hub from bfcache, frozen on "opening the issue" and
+  // without the new issue. Refetch, then remount the hub so its build state is seeded afresh.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+    // refresh only bumps a counter; one listener per mount is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (resource.status === 'loading') return <Loading />;
   if (resource.status === 'error') return <LoadError error={resource.error} onRetry={reload} />;
@@ -49,5 +63,5 @@ export function Home() {
       />
     );
   }
-  return <Hub data={resource.data} />;
+  return <Hub key={loaded} data={resource.data} />;
 }

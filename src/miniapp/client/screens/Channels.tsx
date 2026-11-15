@@ -93,8 +93,12 @@ export function Channels() {
   };
 
   useBackButton(goBack);
+  // Shown only while there is something to add: a disabled MainButton looks the same as an
+  // enabled one in Telegram, and readers tapped it to "finish" instead of going back.
   useMainButton(
-    { text: t.channels.add, enabled: input.trim() !== '' && !adding, loader: adding, shine: false },
+    input.trim() !== '' || adding
+      ? { text: t.channels.add, enabled: !adding, loader: adding, shine: false }
+      : null,
     () => void add(),
   );
 

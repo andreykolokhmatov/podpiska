@@ -1,6 +1,6 @@
 import type { IssueErrorCode, IssueState, Quota } from '@/miniapp/contract';
 
-import { apiErrorText, issueErrorText, t, type ClientErrorCode } from './texts';
+import { apiErrorText, issueFailureText, t, type ClientErrorCode } from './texts';
 
 /** Poll every 2s for the first minute, then every 5s; give up showing progress after 6 minutes. */
 export const POLL_FAST_MS = 2_000;
@@ -9,7 +9,8 @@ export const POLL_FAST_FOR_MS = 60_000;
 export const SLOW_AFTER_MS = 6 * 60_000;
 
 export type BuildFailure =
-  { source: 'issue'; code: IssueErrorCode } | { source: 'api'; code: ClientErrorCode };
+  | { source: 'issue'; code: IssueErrorCode; found?: IssueState['found'] }
+  | { source: 'api'; code: ClientErrorCode };
 
 export type BuildState =
   | { kind: 'idle' }
@@ -58,7 +59,9 @@ function applyIssue(
 ): BuildState {
   if (issue.status === 'ready') return { kind: 'ready', issueId };
   if (issue.status === 'failed') {
-    return { kind: 'failed', failure: { source: 'issue', code: issue.error ?? 'internal' } };
+    const failure: BuildFailure = { source: 'issue', code: issue.error ?? 'internal' };
+    if (issue.found) failure.found = issue.found;
+    return { kind: 'failed', failure };
   }
   if (now - since >= SLOW_AFTER_MS) return { kind: 'slow', issueId };
   return { kind: 'polling', issueId, since, issue, polls };
@@ -147,7 +150,9 @@ export function quotaText(quota: Quota | null): string | null {
   return quota.remaining > 0 ? t.hub.quotaLeft(quota.remaining) : t.hub.quotaNone;
 }
 
-/** Russian text for a failed build. */
-export function failureText(failure: BuildFailure): string {
-  return failure.source === 'issue' ? issueErrorText[failure.code] : apiErrorText[failure.code];
+/** Russian text for a failed build; channelCount = channels in the subscription now. */
+export function failureText(failure: BuildFailure, channelCount: number): string {
+  return failure.source === 'issue'
+    ? issueFailureText(failure.code, failure.found, channelCount)
+    : apiErrorText[failure.code];
 }

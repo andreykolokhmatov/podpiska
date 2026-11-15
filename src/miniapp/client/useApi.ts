@@ -14,6 +14,8 @@ export type Resource<T> =
 export function useApi<T>(load: () => Promise<ApiResult<T>>) {
   const [resource, setResource] = useState<Resource<T>>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  /** Bumped on every successful load, so a screen can remount state seeded from the data. */
+  const [loaded, setLoaded] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -22,6 +24,7 @@ export function useApi<T>(load: () => Promise<ApiResult<T>>) {
       setResource(
         res.ok ? { status: 'ok', data: res.data } : { status: 'error', error: res.error },
       );
+      if (res.ok) setLoaded((n) => n + 1);
     });
     return () => {
       alive = false;
@@ -32,6 +35,9 @@ export function useApi<T>(load: () => Promise<ApiResult<T>>) {
 
   return {
     resource,
+    loaded,
+    /** Refetch in the background, keeping the current data on screen. */
+    refresh: () => setAttempt((n) => n + 1),
     reload: () => {
       setResource({ status: 'loading' });
       setAttempt((n) => n + 1);

@@ -84,6 +84,7 @@ const stateColumns = {
   digestsDone: issues.digestsDone,
   digestsTotal: issues.digestsTotal,
   createdAt: issues.createdAt,
+  stats: issues.statsJson,
 };
 
 const IN_FLIGHT = ['pending', 'collecting', 'digesting', 'composing'] as const;
