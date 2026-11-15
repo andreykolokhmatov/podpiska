@@ -1,113 +1,62 @@
 # Подписка
 
-Персональная газета из Telegram-каналов. Вы даёте список публичных каналов и описываете
-промптом, что вам интересно. По расписанию (раз в день или в неделю) сервис собирает посты,
-LLM отбирает и пересказывает главное, а результат свёрстан как газета и открывается в
-Telegram Mini App. Бот присылает свежий выпуск.
+Персональная газета из публичных Telegram-каналов. Вы добавляете каналы и описываете, что вам
+интересно. Сервис собирает посты, LLM отбирает и пересказывает главное, а выпуск свёрстан как
+настоящая газета и открывается прямо в Telegram Mini App. У каждой заметки есть ссылки на
+исходные посты.
 
-> Статус: ранняя разработка. Сейчас готовы каркас проекта и схема базы данных.
+Демо: [@podpiska_news_bot](https://t.me/podpiska_news_bot)
+
+## Что умеет
+
+- Нативная Telegram Mini App: каналы, интересы, архив выпусков, расписание.
+- Газета: рубрики, главная тема, «В двух словах», цитата дня, афиша; светлая и тёмная тема.
+- Расписание: каждый день, раз в 3 дня или раз в неделю, в выбранный час; бот присылает
+  «Выпуск №N готов».
+- Поделиться выпуском в любой чат (карточка открывает газету в Mini App), скачать PDF.
+- Выжимка канала за день кэшируется и переиспользуется всеми читателями, поэтому LLM-расход
+  растёт с числом каналов, а не пользователей.
 
 ## Стек
 
-- TypeScript (strict), pnpm
-- Next.js (App Router): Mini App и API routes, деплой на Vercel
-- Бот: grammY, webhook
-- База: Postgres (Neon или любой другой) + Drizzle ORM, миграции drizzle-kit
-- LLM: Vercel AI SDK, по умолчанию Gemini
-- Очередь и расписание: Upstash QStash
-- Тесты: vitest
+TypeScript, Next.js (App Router) на Vercel · grammY · Postgres (Neon) + Drizzle ·
+Vercel AI SDK (по умолчанию Gemini) · @telegram-apps/telegram-ui · puppeteer-core +
+@sparticuz/chromium для PDF · GitHub Actions как часовой будильник расписания · vitest.
 
-## Что нужно
+## Свой экземпляр за ~15 минут
 
-- Node.js 20.9 или новее (рекомендуется 24 LTS)
-- corepack (входит в Node.js до 24 включительно; в Node 25+ поставьте: `npm i -g corepack`) — через него ставится нужная версия pnpm
-- Postgres: бесплатная база в [Neon](https://neon.tech) или локальный Postgres
+Нужно: Node.js 22.17+ или 24+, pnpm (через `corepack enable`), бесплатный Postgres
+([Neon](https://neon.tech)), ключ Gemini, бот от [@BotFather](https://t.me/BotFather),
+аккаунт Vercel.
 
-## Локальный запуск
-
-1. Склонируйте репозиторий:
+1. Клонируйте и поставьте зависимости:
    ```sh
-   git clone <url-репозитория> podpiska
-   cd podpiska
+   git clone https://github.com/andreykolokhmatov/podpiska && cd podpiska
+   corepack enable && pnpm install
    ```
-2. Включите corepack (если нужен root, используйте
-   `corepack enable --install-directory ~/.local/bin` или вызывайте `corepack pnpm`):
-   ```sh
-   corepack enable
-   ```
-3. Установите зависимости:
-   ```sh
-   pnpm install
-   ```
-4. Создайте `.env` из шаблона:
-   ```sh
-   cp .env.example .env
-   ```
-5. Впишите в `.env` строку подключения `DATABASE_URL` (для Neon — ещё и
-   `DATABASE_URL_UNPOOLED`, прямое подключение без пулера). Описание всех переменных —
-   в комментариях `.env.example`.
-6. Создайте таблицы:
-   ```sh
-   pnpm db:migrate
-   ```
-7. Запустите dev-сервер и откройте http://localhost:3000:
-   ```sh
-   pnpm dev
-   ```
+2. Скопируйте `.env.example` в `.env` и заполните. Каждая переменная там описана.
+3. Создайте таблицы: `pnpm db:migrate`.
+4. Задеплойте на Vercel (регион `fra1`) и перенесите туда переменные из `.env`
+   (`APP_URL` – адрес деплоя).
+5. Настройте бота: `pnpm bot:setup` (webhook, кнопка меню). В @BotFather включите Main Mini
+   App с URL деплоя.
+6. Расписание: сгенерируйте `openssl rand -hex 32` и положите одно и то же значение в
+   `CRON_SECRET` в Vercel и в GitHub → Settings → Secrets → Actions (`CRON_SECRET`,
+   плюс `APP_URL`). Workflow `.github/workflows/tick.yml` будет будить сервер раз в час.
 
-## Mini App
+Собрать выпуск из консоли (тратит LLM): `pnpm issue --user <telegram_id> --days 1`.
 
-Весь продукт — Telegram Mini App по адресу `APP_URL` (корень сайта). Бот только открывает её
-и присылает уведомление о готовом выпуске.
+## Разработка
 
-1. Примените миграции (Mini App хранит отметку онбординга в `users.onboarded_at`):
-   ```sh
-   pnpm db:migrate
-   ```
-2. В [@BotFather](https://t.me/BotFather) для бота из `TELEGRAM_BOT_TOKEN`:
-   - **Bot Settings → Configure Mini App → Enable Mini App**, URL = `APP_URL`
-     (например `https://podpiska-news.vercel.app`) — это Main Mini App, кнопка «Открыть» в
-     профиле бота;
-   - **Bot Settings → Menu Button**, URL = тот же `APP_URL`.
-3. Необязательно, в `.env` / Vercel:
-   - `TELEGRAM_DEV_BOT_TOKEN` — токен второго (dev) бота, у которого в BotFather указан тот же
-     `APP_URL`. Его initData принимается API, но владельцем он никогда не считается.
-   - `OWNER_TELEGRAM_ID` — ваш числовой Telegram id: без дневного лимита «Собрать выпуск»
-     (только когда Mini App открыта из основного бота).
-   - `MAX_BUILDS_PER_DAY_GLOBAL` — общий дневной лимит сборок на всех (по умолчанию 30).
+```sh
+pnpm dev                 # Next.js; /?mock=1 – Mini App на моках без Telegram
+pnpm test                # vitest, без реальных LLM и сетевых вызовов
+pnpm exec tsc --noEmit   # типы
+pnpm lint
+```
 
-Mini App работает только внутри Telegram: в обычном браузере `/` показывает «Откройте в
-Telegram» и не обращается к API. Газета `/issue/<id>` и `/privacy` открываются и в браузере.
-
-Для вёрстки без Telegram есть dev-мок (только `pnpm dev`, в production-сборку не попадает):
-`http://localhost:3000/?mock=1&theme=dark&scenario=hub` — подменяет окружение Telegram и
-ответы API фикстурами; `scenario` = `onboarding` | `hub` | `done` | `building` | `fresh`.
-
-## Скрипты
-
-| Команда            | Что делает                                       |
-| ------------------ | ------------------------------------------------ |
-| `pnpm dev`         | dev-сервер Next.js                               |
-| `pnpm build`       | production-сборка                                |
-| `pnpm start`       | запуск production-сборки                         |
-| `pnpm test`        | тесты (vitest)                                   |
-| `pnpm lint`        | ESLint                                           |
-| `pnpm typecheck`   | проверка типов TypeScript                        |
-| `pnpm format`      | форматирование Prettier                          |
-| `pnpm db:generate` | сгенерировать SQL-миграцию из `src/db/schema.ts` |
-| `pnpm db:migrate`  | применить миграции к базе                        |
-
-## Дорожная карта
-
-1. Каркас и база данных ← сейчас здесь
-2. Сборщик постов из публичных каналов
-3. LLM-пайплайн и вёрстка газеты
-4. Telegram-бот
-5. Mini App
-6. Деплой на Vercel
-7. Расписание выпусков
-8. Оплата Telegram Stars и свой ключ LLM (BYOK)
+Газету без базы можно посмотреть на `/issue/preview?fixture=reference` (только в dev).
 
 ## Лицензия
 
-[MIT](LICENSE)
+MIT, см. [LICENSE](LICENSE).
