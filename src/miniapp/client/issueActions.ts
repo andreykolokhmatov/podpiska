@@ -1,11 +1,9 @@
 import {
   AccessDeniedError,
   downloadFile,
-  mainButton,
   openLink,
   openTelegramLink,
   popup,
-  secondaryButton,
   shareMessage,
   ShareMessageError,
 } from '@tma.js/sdk-react';
@@ -30,11 +28,18 @@ export function issueIdFromPath(pathname: string): string | null {
   return id !== null && UUID.test(id) ? id : null;
 }
 
+/** Shows the owner's action trigger on the page; returns how to set it busy and remove it. */
+export type MountTrigger = (onClick: () => void) => {
+  setBusy: (busy: boolean) => void;
+  remove: () => void;
+};
+
 export interface IssueActionsOptions {
   /** From the newspaper's promo plate; null when the deploy has no TELEGRAM_BOT_USERNAME. */
   botUsername: string | null;
   /** Public origin of the newspaper, for the fallback share link. */
   origin: string;
+  mountTrigger: MountTrigger;
 }
 
 async function showError(message: string): Promise<void> {
@@ -55,33 +60,34 @@ const isCancel = (error: unknown): boolean =>
   error instanceof AccessDeniedError ||
   (error instanceof ShareMessageError && error.message === 'USER_DECLINED');
 
+type Action = 'share' | 'pdf';
+
+/** Native action sheet; without popups (old clients) the trigger just shares. */
+async function chooseAction(number: number | null): Promise<Action | null> {
+  if (!popup.show.isAvailable()) return 'share';
+  const id = await popup.show({
+    title: number === null ? t.issueActions.menuTitleBare : t.issueTitle(number),
+    message: t.issueActions.menuText,
+    buttons: [
+      { id: 'share', type: 'default', text: t.issueActions.share },
+      { id: 'pdf', type: 'default', text: t.issueActions.pdf },
+      { type: 'cancel' },
+    ],
+  });
+  return id === 'share' || id === 'pdf' ? id : null;
+}
+
 /**
- * Owner actions on the newspaper inside the Mini App: MainButton «Поделиться» and
- * SecondaryButton «Скачать PDF». The issue endpoint answers 200 only for the owner's own ready
- * issue, so anyone else (or a deleted issue) gets no buttons. Returns a cleanup.
+ * Owner actions on the newspaper inside the Mini App: one quiet round trigger (not the bottom
+ * bar, which covered the paper) opening a native popup with «Поделиться» / «Скачать PDF». The
+ * issue endpoint answers 200 only for the owner's own ready issue, so anyone else gets nothing.
+ * Returns a cleanup.
  */
 export function startIssueActions(issueId: string, options: IssueActionsOptions): () => void {
   let alive = true;
   let busy = false;
-  const offs: (() => void)[] = [];
+  let trigger: ReturnType<MountTrigger> | undefined;
   const path = `/api/app/issues/${encodeURIComponent(issueId)}`;
-
-  const run = async (
-    button: typeof mainButton | typeof secondaryButton,
-    action: () => Promise<void>,
-  ) => {
-    if (busy) return;
-    busy = true;
-    haptic.impact();
-    button.setParams.ifAvailable({ isLoaderVisible: true, isEnabled: false });
-    try {
-      await action();
-    } finally {
-      busy = false;
-      if (alive) button.setParams.ifAvailable({ isLoaderVisible: false, isEnabled: true });
-    }
-  };
-
   const share = async (number: number | null) => {
     if (!shareMessage.isAvailable()) {
       const link = options.botUsername
@@ -120,37 +126,31 @@ export function startIssueActions(issueId: string, options: IssueActionsOptions)
     }
   };
 
+  const onTrigger = async (number: number | null) => {
+    if (busy) return;
+    busy = true;
+    haptic.selection();
+    try {
+      const action = await chooseAction(number);
+      if (action === null || !alive) return;
+      haptic.impact();
+      trigger?.setBusy(true);
+      await (action === 'share' ? share(number) : download());
+    } finally {
+      busy = false;
+      if (alive) trigger?.setBusy(false);
+    }
+  };
+
   void apiFetch(path, issueResponseSchema).then((res) => {
     if (!alive || !res.ok || res.data.issue.status !== 'ready') return;
     const number = res.data.issue.number;
-
-    mainButton.setParams.ifAvailable({
-      isVisible: true,
-      isEnabled: true,
-      isLoaderVisible: false,
-      hasShineEffect: false,
-      text: t.issueActions.share,
-    });
-    secondaryButton.setParams.ifAvailable({
-      isVisible: true,
-      isEnabled: true,
-      isLoaderVisible: false,
-      hasShineEffect: false,
-      position: 'left',
-      text: t.issueActions.pdf,
-    });
-    for (const off of [
-      mainButton.onClick.ifAvailable(() => void run(mainButton, () => share(number))),
-      secondaryButton.onClick.ifAvailable(() => void run(secondaryButton, download)),
-    ]) {
-      if (off.ok) offs.push(off.data);
-    }
+    trigger = options.mountTrigger(() => void onTrigger(number));
   });
 
   return () => {
     alive = false;
-    for (const off of offs.splice(0)) off();
-    mainButton.setParams.ifAvailable({ isVisible: false, isLoaderVisible: false });
-    secondaryButton.setParams.ifAvailable({ isVisible: false, isLoaderVisible: false });
+    trigger?.remove();
+    trigger = undefined;
   };
 }

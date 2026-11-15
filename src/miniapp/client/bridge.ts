@@ -12,7 +12,8 @@ import {
 
 import { configureApi, type FetchLike } from './api';
 import { loadDevMock, wantsDevMock } from './devMock';
-import { issueIdFromPath, startIssueActions } from './issueActions';
+import { issueIdFromPath, startIssueActions, type MountTrigger } from './issueActions';
+import { t } from './texts';
 
 /** Opened by a full page load, so history.back() returns to the Mini App screen we came from. */
 function goBack(): void {
@@ -34,6 +35,27 @@ async function apiTransport(): Promise<FetchLike | undefined> {
   if (!loadDevMock || !wantsDevMock(window.location.search)) return undefined;
   return (await loadDevMock()).installDevMock(window.location.search);
 }
+
+const SHARE_ICON =
+  '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>';
+
+/** Round ink button in the newspaper's corner; styled by .np-fab in newspaper.css. */
+const mountShareFab: MountTrigger = (onClick) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'np-fab';
+  button.setAttribute('aria-label', t.issueActions.trigger);
+  button.innerHTML = SHARE_ICON;
+  button.addEventListener('click', onClick);
+  (document.querySelector('.np') ?? document.body).append(button);
+  return {
+    setBusy: (busy) => {
+      button.disabled = busy;
+      button.classList.toggle('np-fab--busy', busy);
+    },
+    remove: () => button.remove(),
+  };
+};
 
 /**
  * Telegram keeps the hub's MainButton across the full page load, so the newspaper would show an
@@ -97,6 +119,7 @@ export function startBridge(): (() => void) | undefined {
         stopActions = startIssueActions(issueId, {
           botUsername: promoBot(),
           origin: window.location.origin,
+          mountTrigger: mountShareFab,
         });
       });
   }

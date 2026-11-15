@@ -25,10 +25,11 @@ export function TmaRoot({ children }: TmaRootProps) {
       if (!alive) return;
       if (value?.redirect) {
         // Opened by a shared issue link: go straight to the newspaper, render no screen (no API
-        // call, so a reader is not registered). Back may restore this page from bfcache – then
-        // show the app as a normal launch.
+        // call, so a reader is not registered). Back may restore this page from bfcache, frozen
+        // mid-navigation; rendering the app on top of that crashed into Next's error page on iOS.
+        // Reload instead: the start param is consumed, so it comes back as a normal launch.
         const onPageShow = (event: PageTransitionEvent) => {
-          if (event.persisted) setEnv({ ...value, redirect: null });
+          if (event.persisted) window.location.reload();
         };
         window.addEventListener('pageshow', onPageShow);
         offPageShow = () => window.removeEventListener('pageshow', onPageShow);

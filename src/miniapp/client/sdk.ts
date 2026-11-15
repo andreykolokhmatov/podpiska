@@ -11,6 +11,8 @@ import {
   popup,
   retrieveLaunchParams,
   retrieveRawInitData,
+  postEvent,
+  secondaryButton,
   themeParams,
   viewport,
 } from '@tma.js/sdk-react';
@@ -43,6 +45,15 @@ const startFlag = sessionFlagStore(START_CONSUMED_KEY, () => window.sessionStora
 
 let pending: Promise<TmaEnv | null> | undefined;
 
+/** The SDK skips posting when its restored state already says hidden; Telegram may disagree. */
+export function hideSecondaryRaw(): void {
+  try {
+    postEvent('web_app_setup_secondary_button', { is_visible: false });
+  } catch {
+    // Older clients without a secondary button.
+  }
+}
+
 /** Initializes the SDK once per document; null = not inside Telegram (no API calls then). */
 export function initTmaOnce(): Promise<TmaEnv | null> {
   pending ??= start().catch(() => null);
@@ -67,6 +78,10 @@ async function start(): Promise<TmaEnv | null> {
     isLoaderVisible: false,
     hasShineEffect: false,
   });
+  // The app never uses the secondary button; a stale one (older newspaper builds) must not linger.
+  secondaryButton.mount.ifAvailable();
+  secondaryButton.setParams.ifAvailable({ isVisible: false });
+  hideSecondaryRaw();
   themeParams.mount.ifAvailable();
   themeParams.bindCssVars.ifAvailable();
   miniApp.mount.ifAvailable();

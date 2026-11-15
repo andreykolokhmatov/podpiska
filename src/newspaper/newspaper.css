@@ -541,6 +541,49 @@ html:has(.np[data-theme='light']) {
   }
 }
 
+/* owner's share/PDF trigger, added by the Mini App bridge */
+.np .np-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.22);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+.np .np-fab:active {
+  transform: scale(0.92);
+}
+.np .np-fab--busy {
+  opacity: 0.6;
+}
+.np .np-fab--busy svg {
+  animation: np-fab-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes np-fab-pulse {
+  to {
+    opacity: 0.3;
+  }
+}
+@media (min-width: 1024px) {
+  .np .np-fab {
+    right: 24px;
+    bottom: 24px;
+  }
+}
+
 /* status pages */
 .np .status {
   margin: 48px auto 0;
@@ -866,6 +909,7 @@ html:has(.np[data-theme='light']) {
   .np .lead {
     break-inside: auto;
   }
+  .np .np-fab,
   #mock-main-button,
   #mock-secondary-button,
   #mock-back-button {

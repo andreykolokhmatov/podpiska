@@ -3,27 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const sdk = vi.hoisted(() => {
   class AccessDeniedError extends Error {}
   class ShareMessageError extends Error {}
-  const button = () => {
-    const listeners = new Set<() => void>();
-    return {
-      listeners,
-      setParams: { ifAvailable: vi.fn<(state: Record<string, unknown>) => void>() },
-      onClick: {
-        ifAvailable: vi.fn((listener: () => void) => {
-          listeners.add(listener);
-          return { ok: true, data: () => listeners.delete(listener) };
-        }),
-      },
-      click: () => listeners.forEach((l) => l()),
-    };
-  };
   const feature = <T extends (...args: never[]) => unknown>() =>
     Object.assign(vi.fn<T>(), { isAvailable: vi.fn(() => true), ifAvailable: vi.fn() });
   return {
     AccessDeniedError,
     ShareMessageError,
-    mainButton: button(),
-    secondaryButton: button(),
     shareMessage: feature<(id: string) => Promise<void>>(),
     downloadFile: feature<(url: string, fileName: string) => Promise<void>>(),
     openLink: feature<(url: string) => void>(),
@@ -40,10 +24,32 @@ const sdk = vi.hoisted(() => {
 vi.mock('@tma.js/sdk-react', () => sdk);
 
 import { configureApi } from './api';
-import { issueIdFromPath, startIssueActions } from './issueActions';
+import { issueIdFromPath, startIssueActions, type MountTrigger } from './issueActions';
 
 const ID = '6f1c2e9a-3b4d-4c5e-8f70-1a2b3c4d5e6f';
-const OPTIONS = { botUsername: 'podpiska_news_bot', origin: 'https://podpiska-news.vercel.app' };
+const trigger = {
+  onClick: null as (() => void) | null,
+  busy: [] as boolean[],
+  removed: 0,
+  click: () => trigger.onClick?.(),
+};
+const mountTrigger: MountTrigger = (onClick) => {
+  trigger.onClick = onClick;
+  return {
+    setBusy: (busy) => trigger.busy.push(busy),
+    remove: () => {
+      trigger.removed += 1;
+      trigger.onClick = null;
+    },
+  };
+};
+const OPTIONS = {
+  botUsername: 'podpiska_news_bot',
+  origin: 'https://podpiska-news.vercel.app',
+  mountTrigger,
+};
+/** The native action sheet answers with this button id. */
+const choose = (id: string) => sdk.popup.show.mockResolvedValueOnce(id);
 
 type Route = (method: string, path: string) => [number, unknown];
 
@@ -67,12 +73,10 @@ function backend(route: Route) {
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-const lastParams = (button: typeof sdk.mainButton) =>
-  button.setParams.ifAvailable.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  for (const button of [sdk.mainButton, sdk.secondaryButton]) button.listeners.clear();
+  Object.assign(trigger, { onClick: null, busy: [], removed: 0 });
   for (const f of [sdk.shareMessage, sdk.downloadFile, sdk.popup.show]) {
     f.isAvailable.mockReturnValue(true);
   }
@@ -89,16 +93,27 @@ describe('issueIdFromPath', () => {
 });
 
 describe('startIssueActions', () => {
-  it('owner: shows «Поделиться» and «Скачать PDF»', async () => {
+  it('owner: mounts one trigger that opens a native menu with both actions', async () => {
     backend(() => ready);
     startIssueActions(ID, OPTIONS);
     await flush();
     expect(calls).toEqual([`GET /api/app/issues/${ID}`]);
-    expect(lastParams(sdk.mainButton)).toMatchObject({ isVisible: true, text: 'Поделиться' });
-    expect(lastParams(sdk.secondaryButton)).toMatchObject({
-      isVisible: true,
-      text: 'Скачать PDF',
-    });
+    expect(trigger.onClick).not.toBeNull();
+    choose('cancel-id');
+    trigger.click();
+    await flush();
+    expect(sdk.popup.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Выпуск №\u00A07',
+        buttons: [
+          { id: 'share', type: 'default', text: 'Поделиться' },
+          { id: 'pdf', type: 'default', text: 'Скачать PDF' },
+          { type: 'cancel' },
+        ],
+      }),
+    );
+    expect(sdk.shareMessage).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
   });
 
   it.each([
@@ -107,25 +122,24 @@ describe('startIssueActions', () => {
       'not ready',
       [200, { issue: { id: ID, status: 'composing', progress: null, error: null, number: null } }],
     ],
-  ] as const)('%s: no buttons', async (_, response) => {
+  ] as const)('%s: no trigger', async (_, response) => {
     backend(() => response as [number, unknown]);
     startIssueActions(ID, OPTIONS);
     await flush();
-    expect(sdk.mainButton.setParams.ifAvailable).not.toHaveBeenCalled();
-    expect(sdk.secondaryButton.setParams.ifAvailable).not.toHaveBeenCalled();
-    expect(sdk.mainButton.listeners.size).toBe(0);
+    expect(trigger.onClick).toBeNull();
   });
 
   it('share: POST share → shareMessage(preparedMessageId)', async () => {
     backend((method) => (method === 'POST' ? [200, { preparedMessageId: 'pm-1' }] : ready));
     startIssueActions(ID, OPTIONS);
     await flush();
-    sdk.mainButton.click();
+    choose('share');
+    trigger.click();
     await flush();
     expect(calls.at(-1)).toBe(`POST /api/app/issues/${ID}/share`);
     expect(sdk.shareMessage).toHaveBeenCalledWith('pm-1');
-    expect(sdk.popup.show).not.toHaveBeenCalled();
-    expect(lastParams(sdk.mainButton)).toMatchObject({ isLoaderVisible: false, isEnabled: true });
+    expect(sdk.popup.show).toHaveBeenCalledTimes(1);
+    expect(trigger.busy).toEqual([true, false]);
   });
 
   it('share: user cancel is silent', async () => {
@@ -133,16 +147,18 @@ describe('startIssueActions', () => {
     sdk.shareMessage.mockRejectedValueOnce(new sdk.ShareMessageError('USER_DECLINED'));
     startIssueActions(ID, OPTIONS);
     await flush();
-    sdk.mainButton.click();
+    choose('share');
+    trigger.click();
     await flush();
-    expect(sdk.popup.show).not.toHaveBeenCalled();
+    expect(sdk.popup.show).toHaveBeenCalledTimes(1);
   });
 
   it('share: API error → popup with Russian text', async () => {
     backend((method) => (method === 'POST' ? [500, { error: 'misconfigured' }] : ready));
     startIssueActions(ID, OPTIONS);
     await flush();
-    sdk.mainButton.click();
+    choose('share');
+    trigger.click();
     await flush();
     expect(sdk.shareMessage).not.toHaveBeenCalled();
     expect(sdk.popup.show).toHaveBeenCalledWith(
@@ -155,7 +171,8 @@ describe('startIssueActions', () => {
     sdk.shareMessage.isAvailable.mockReturnValue(false);
     startIssueActions(ID, OPTIONS);
     await flush();
-    sdk.mainButton.click();
+    choose('share');
+    trigger.click();
     await flush();
     expect(calls).toHaveLength(1);
     const url = sdk.openTelegramLink.ifAvailable.mock.calls[0]?.[0] as string;
@@ -170,7 +187,8 @@ describe('startIssueActions', () => {
     sdk.shareMessage.isAvailable.mockReturnValue(false);
     startIssueActions(ID, { ...OPTIONS, botUsername: null });
     await flush();
-    sdk.mainButton.click();
+    choose('share');
+    trigger.click();
     await flush();
     const url = new URL(sdk.openTelegramLink.ifAvailable.mock.calls[0]?.[0] as string);
     expect(url.searchParams.get('url')).toBe(`https://podpiska-news.vercel.app/issue/${ID}`);
@@ -182,11 +200,12 @@ describe('startIssueActions', () => {
     startIssueActions(ID, OPTIONS);
     await flush();
     sdk.downloadFile.mockRejectedValueOnce(new sdk.AccessDeniedError('denied'));
-    sdk.secondaryButton.click();
+    choose('pdf');
+    trigger.click();
     await flush();
     expect(calls.at(-1)).toBe(`POST /api/app/issues/${ID}/pdf-link`);
     expect(sdk.downloadFile).toHaveBeenCalledWith(link.url, link.fileName);
-    expect(sdk.popup.show).not.toHaveBeenCalled();
+    expect(sdk.popup.show).toHaveBeenCalledTimes(1);
   });
 
   it('PDF fallback without downloadFile: openLink(url)', async () => {
@@ -195,7 +214,8 @@ describe('startIssueActions', () => {
     sdk.downloadFile.isAvailable.mockReturnValue(false);
     startIssueActions(ID, OPTIONS);
     await flush();
-    sdk.secondaryButton.click();
+    choose('pdf');
+    trigger.click();
     await flush();
     expect(sdk.downloadFile).not.toHaveBeenCalled();
     expect(sdk.openLink.ifAvailable).toHaveBeenCalledWith(link.url);
@@ -207,30 +227,28 @@ describe('startIssueActions', () => {
     sdk.downloadFile.mockRejectedValueOnce(new Error('boom'));
     startIssueActions(ID, OPTIONS);
     await flush();
-    sdk.secondaryButton.click();
+    choose('pdf');
+    trigger.click();
     await flush();
     expect(sdk.popup.show).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Не удалось скачать PDF. Попробуйте ещё раз.' }),
     );
   });
 
-  it('cleanup hides both buttons and removes handlers', async () => {
+  it('cleanup removes the trigger', async () => {
     backend(() => ready);
     const stop = startIssueActions(ID, OPTIONS);
     await flush();
     stop();
-    expect(sdk.mainButton.listeners.size).toBe(0);
-    expect(sdk.secondaryButton.listeners.size).toBe(0);
-    expect(lastParams(sdk.mainButton)).toMatchObject({ isVisible: false });
-    expect(lastParams(sdk.secondaryButton)).toMatchObject({ isVisible: false });
+    expect(trigger.removed).toBe(1);
+    expect(trigger.onClick).toBeNull();
   });
 
-  it('cleanup before the issue loads: buttons never appear', async () => {
+  it('cleanup before the issue loads: the trigger never appears', async () => {
     backend(() => ready);
     const stop = startIssueActions(ID, OPTIONS);
     stop();
     await flush();
-    expect(sdk.mainButton.listeners.size).toBe(0);
-    expect(lastParams(sdk.mainButton)).toMatchObject({ isVisible: false });
+    expect(trigger.onClick).toBeNull();
   });
 });
