@@ -1,0 +1,368 @@
+/* Mini App chrome on top of telegram-ui. Colors come from Telegram theme vars (themeParams.bindCssVars). */
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--tg-theme-secondary-bg-color, transparent);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pd-root,
+.pd-outside {
+  font-family: var(
+    --tgui--font-family,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Roboto',
+    'Helvetica Neue',
+    sans-serif
+  );
+}
+
+.pd-root {
+  min-height: 100vh;
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+  background: var(--tgui--secondary_bg_color);
+}
+
+.pd-splash {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.pd-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2.5px solid rgb(142 142 147 / 0.25);
+  border-top-color: rgb(142 142 147 / 0.9);
+  animation: pd-spin 0.8s linear infinite;
+}
+
+@keyframes pd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pd-page {
+  box-sizing: border-box;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: calc(8px + var(--tg-viewport-content-safe-area-inset-top, 0px)) 0
+    calc(24px + var(--tg-viewport-safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pd-center {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+}
+
+/* Section headers on iOS sit flush with cells; keep the default telegram-ui spacing elsewhere. */
+.pd-page > section,
+.pd-page > form > section {
+  margin: 0;
+}
+
+/* ---------- onboarding ---------- */
+
+.pd-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 16px 24px 8px;
+}
+
+.pd-hero__accent {
+  margin: 16px 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tgui--accent_text_color);
+}
+
+.pd-hero__title {
+  margin: 0;
+  max-width: 320px;
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--tgui--text_color);
+}
+
+.pd-emoji {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.pd-emoji__anim {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.pd-emoji__anim[data-ready='true'] {
+  opacity: 1;
+}
+
+.pd-emoji__static {
+  line-height: 1;
+}
+
+.pd-footnote {
+  margin: 4px 24px 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--tgui--hint_color);
+}
+
+.pd-footnote a {
+  color: var(--tgui--link_color);
+  text-decoration: none;
+}
+
+.pd-message {
+  margin: 0 20px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.pd-message--error,
+.pd-error-text {
+  color: var(--tgui--destructive_text_color);
+}
+
+/* ---------- icons ---------- */
+
+.pd-icon {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.pd-icon--square {
+  border-radius: 8px;
+}
+
+.pd-icon--round {
+  border-radius: 50%;
+}
+
+.pd-chevron {
+  color: var(--tgui--hint_color);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.pd-after {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pd-after__value {
+  color: var(--tgui--hint_color);
+  font-size: 17px;
+}
+
+.pd-headline {
+  display: block;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* ---------- hub ---------- */
+
+.pd-hub__header {
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  padding: 4px 16px 8px;
+}
+
+.pd-hub__title {
+  margin: 0;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--tgui--text_color);
+}
+
+.pd-round-button {
+  justify-self: end;
+  width: 40px;
+  height: 40px;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center;
+}
+
+.pd-avatar {
+  display: block;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.pd-avatar--initials {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #72d5fd, #2a9ef1);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pd-status-spinner {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+}
+
+/* ---------- checklist (НАЧАЛО РАБОТЫ) ---------- */
+
+.pd-step {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Connector to the next step's circle, drawn through the cell divider. */
+.pd-step:not([data-last='true'])::after {
+  content: '';
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  width: 2px;
+  height: 30px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: var(--tgui--hint_color);
+  opacity: 0.3;
+}
+
+.pd-step--done {
+  background: #34c759;
+  color: #fff;
+}
+
+.pd-step--done::after {
+  background: #34c759 !important;
+  opacity: 0.6 !important;
+}
+
+.pd-step--current {
+  background: var(--tgui--button_color);
+  color: var(--tgui--button_text_color);
+}
+
+.pd-step--todo {
+  border: 2px solid color-mix(in srgb, var(--tgui--hint_color) 45%, transparent);
+  color: var(--tgui--hint_color);
+}
+
+.pd-checklist [class*='tgui'] {
+  overflow: visible;
+}
+
+.pd-step-cell--done {
+  opacity: 0.55;
+}
+
+/* ---------- forms ---------- */
+
+/* telegram-ui paints inputs with bg_color; inside a section they should match the cells. */
+.pd-form-section {
+  --tgui--bg_color: var(--tgui--section_bg_color);
+}
+
+.pd-section-note {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--tgui--section_header_text_color, var(--tgui--hint_color));
+}
+
+.pd-section-note--error {
+  color: var(--tgui--destructive_text_color);
+}
+
+.pd-section-note--success {
+  color: #34c759;
+}
+
+.pd-section-note--split {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pd-section-note--split > :last-child {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 14px;
+}
+
+.pd-chips button {
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+}
+
+.pd-danger {
+  color: var(--tgui--destructive_text_color) !important;
+}
+
+.pd-warn {
+  color: var(--tgui--destructive_text_color);
+}
+
+/* ---------- outside Telegram ---------- */
+
+.pd-outside {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 0 16px;
+  box-sizing: border-box;
+  background: var(--tgui--secondary_bg_color);
+}
+
+.pd-outside__emoji {
+  font-size: 96px;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pd-spinner {
+    animation-duration: 2.4s;
+  }
+}

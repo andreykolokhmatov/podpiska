@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Database } from '@/db';
 import { channels, userChannels, users } from '@/db/schema';
@@ -67,4 +67,48 @@ export function createChannelsDbStore(db: Database): ChannelsStore {
       });
     },
   };
+}
+
+export interface UserChannelView {
+  username: string;
+  title: string | null;
+  /** Signed t.me CDN URL; expires, refreshed by every collect. */
+  avatarUrl: string | null;
+  isAvailable: boolean;
+}
+
+/** The user's channels, oldest subscription first. */
+export async function listUserChannels(db: Database, userId: number): Promise<UserChannelView[]> {
+  return db
+    .select({
+      username: channels.username,
+      title: channels.title,
+      avatarUrl: channels.avatarUrl,
+      isAvailable: channels.isAvailable,
+    })
+    .from(userChannels)
+    .innerJoin(channels, eq(channels.id, userChannels.channelId))
+    .where(eq(userChannels.userId, userId))
+    .orderBy(asc(userChannels.createdAt), asc(channels.username));
+}
+
+/** Unlinks the channel from the user only (the channel, its posts and digests stay). */
+export async function removeUserChannel(
+  db: Database,
+  userId: number,
+  username: string,
+): Promise<boolean> {
+  const rows = await db
+    .delete(userChannels)
+    .where(
+      and(
+        eq(userChannels.userId, userId),
+        inArray(
+          userChannels.channelId,
+          db.select({ id: channels.id }).from(channels).where(eq(channels.username, username)),
+        ),
+      ),
+    )
+    .returning({ channelId: userChannels.channelId });
+  return rows.length > 0;
 }

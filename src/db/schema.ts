@@ -25,6 +25,8 @@ export const users = pgTable('users', {
   interestsPrompt: text('interests_prompt'),
   // Set when Telegram answers 403 (user blocked the bot); cleared by /start.
   botBlockedAt: timestamp('bot_blocked_at', { withTimezone: true }),
+  // Set once the user finishes the Mini App onboarding screen.
+  onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnvError, getBotEnv, getDatabaseUrl, getLlmEnv, parseEnv } from './env';
+import { EnvError, getBotEnv, getDatabaseUrl, getLlmEnv, getMiniAppEnv, parseEnv } from './env';
 
 const validSource = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/podpiska',
@@ -168,5 +168,54 @@ describe('getBotEnv', () => {
     expect(error.message).toContain('TELEGRAM_BOT_TOKEN');
     expect(error.message).toContain('TELEGRAM_WEBHOOK_SECRET');
     expect(error.message).not.toContain('oops-SECRET');
+  });
+});
+
+describe('getMiniAppEnv', () => {
+  const app = { TELEGRAM_BOT_TOKEN: validSource.TELEGRAM_BOT_TOKEN };
+
+  it('needs only the bot token and applies defaults', () => {
+    const env = getMiniAppEnv(app);
+    expect(env.TELEGRAM_DEV_BOT_TOKEN).toBeUndefined();
+    expect(env.OWNER_TELEGRAM_ID).toBeUndefined();
+    expect(env.MAX_CHANNELS_PER_USER).toBe(50);
+    expect(env.MAX_BUILDS_PER_DAY_GLOBAL).toBe(30);
+  });
+
+  it('parses the optional dev token, owner id and global cap', () => {
+    const env = getMiniAppEnv({
+      ...app,
+      TELEGRAM_DEV_BOT_TOKEN: '987654321:dev-token',
+      OWNER_TELEGRAM_ID: '12345',
+      MAX_BUILDS_PER_DAY_GLOBAL: '5',
+    });
+    expect(env.TELEGRAM_DEV_BOT_TOKEN).toBe('987654321:dev-token');
+    expect(env.OWNER_TELEGRAM_ID).toBe(12345);
+    expect(env.MAX_BUILDS_PER_DAY_GLOBAL).toBe(5);
+  });
+
+  it('treats empty optional values as not set', () => {
+    const env = getMiniAppEnv({ ...app, TELEGRAM_DEV_BOT_TOKEN: '', OWNER_TELEGRAM_ID: ' ' });
+    expect(env.TELEGRAM_DEV_BOT_TOKEN).toBeUndefined();
+    expect(env.OWNER_TELEGRAM_ID).toBeUndefined();
+  });
+
+  it('rejects bad values without echoing them', () => {
+    const error = errorOf(() =>
+      getMiniAppEnv({
+        TELEGRAM_DEV_BOT_TOKEN: 'dev-SECRET',
+        OWNER_TELEGRAM_ID: '-4',
+        MAX_BUILDS_PER_DAY_GLOBAL: '0',
+      }),
+    );
+    for (const key of [
+      'TELEGRAM_BOT_TOKEN',
+      'TELEGRAM_DEV_BOT_TOKEN',
+      'OWNER_TELEGRAM_ID',
+      'MAX_BUILDS_PER_DAY_GLOBAL',
+    ]) {
+      expect(error.message).toContain(key);
+    }
+    expect(error.message).not.toContain('dev-SECRET');
   });
 });

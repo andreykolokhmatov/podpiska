@@ -1,3 +1,9 @@
 allowBuilds:
   esbuild: true
   sharp: true
+peerDependencyRules:
+  allowedVersions:
+    '@telegram-apps/telegram-ui>react': '19'
+    '@telegram-apps/telegram-ui>react-dom': '19'
+    '@xelene/vaul-with-scroll-fix>react': '19'
+    '@xelene/vaul-with-scroll-fix>react-dom': '19'

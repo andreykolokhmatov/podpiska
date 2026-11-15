@@ -20,7 +20,7 @@ export function issueReadyMessage(
   };
 }
 
-export type NotifyOutcome = 'sent' | 'skipped' | 'blocked';
+export type NotifyOutcome = 'sent' | 'skipped' | 'blocked' | 'unreachable';
 
 export interface NotifierDeps {
   api: Pick<Api, 'sendMessage'>;
@@ -30,6 +30,10 @@ export interface NotifierDeps {
 }
 
 const MAX_RETRY_AFTER_S = 10;
+
+// Only these 403s mean the user cut the bot off; "bot can't initiate conversation" just means
+// they never pressed Start (e.g. a Mini App user), which must not mark them blocked.
+const BLOCKED_403 = /blocked by the user|user is deactivated/i;
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -64,7 +68,8 @@ export function createIssueNotifier(
       return 'sent';
     } catch (error) {
       if (error instanceof GrammyError && error.error_code === 403) {
-        // Blocked or deactivated: retrying is pointless until the user sends /start again.
+        // Either way the claim stays: retrying is pointless until the user sends /start.
+        if (!BLOCKED_403.test(error.description)) return 'unreachable';
         await deps.store.markBlocked(notice.userId);
         return 'blocked';
       }

@@ -70,11 +70,29 @@ const requireProviderKey = (
   }
 };
 
+const botToken = () =>
+  z.string().regex(/^\d+:[\w-]+$/, 'must look like <bot id>:<secret> from @BotFather');
+
+const telegramBotToken = requiredString('is required').pipe(botToken());
+
+const boundedInt = (min: number, max: number, fallback: number) => {
+  const message = `must be an integer ${min}..${max}`;
+  return z.preprocess(
+    emptyToUndefined,
+    z.coerce
+      .number({ error: message })
+      .int(message)
+      .min(min, message)
+      .max(max, message)
+      .default(fallback),
+  );
+};
+
+const maxChannelsPerUser = boundedInt(1, 1000, 50);
+
 // Telegram webhooks and Mini Apps require https, so http is rejected even for dev.
 const botShape = {
-  TELEGRAM_BOT_TOKEN: requiredString('is required').pipe(
-    z.string().regex(/^\d+:[\w-]+$/, 'must look like <bot id>:<secret> from @BotFather'),
-  ),
+  TELEGRAM_BOT_TOKEN: telegramBotToken,
   TELEGRAM_WEBHOOK_SECRET: requiredString('is required').pipe(
     z.string().regex(/^[A-Za-z0-9_-]{1,256}$/, 'must be 1-256 chars of A-Z, a-z, 0-9, _ or -'),
   ),
@@ -83,15 +101,7 @@ const botShape = {
       .url({ protocol: /^https$/, error: 'must be an https URL' })
       .transform((value) => value.replace(/\/+$/, '')),
   ),
-  MAX_CHANNELS_PER_USER: z.preprocess(
-    emptyToUndefined,
-    z.coerce
-      .number({ error: 'must be an integer 1..1000' })
-      .int('must be an integer 1..1000')
-      .min(1, 'must be an integer 1..1000')
-      .max(1000, 'must be an integer 1..1000')
-      .default(50),
-  ),
+  MAX_CHANNELS_PER_USER: maxChannelsPerUser,
 };
 
 const envSchema = z
@@ -175,6 +185,36 @@ export type BotEnv = z.infer<typeof botEnvSchema>;
 /** Validates only the bot variables: the bot needs no LLM key. */
 export function getBotEnv(source: EnvSource = process.env): BotEnv {
   const result = botEnvSchema.safeParse(source);
+  if (!result.success) {
+    throw new EnvError(formatIssues(result.error));
+  }
+  return result.data;
+}
+
+const miniAppShape = {
+  TELEGRAM_BOT_TOKEN: telegramBotToken,
+  // Lets the dev bot open the prod Mini App; its initData never grants owner rights.
+  TELEGRAM_DEV_BOT_TOKEN: z.preprocess(emptyToUndefined, botToken().optional()),
+  OWNER_TELEGRAM_ID: z.preprocess(
+    emptyToUndefined,
+    z.coerce
+      .number({ error: 'must be a positive integer Telegram user id' })
+      .int('must be a positive integer Telegram user id')
+      .positive('must be a positive integer Telegram user id')
+      .max(Number.MAX_SAFE_INTEGER, 'must be a positive integer Telegram user id')
+      .optional(),
+  ),
+  MAX_CHANNELS_PER_USER: maxChannelsPerUser,
+  MAX_BUILDS_PER_DAY_GLOBAL: boundedInt(1, 100_000, 30),
+};
+
+const miniAppEnvSchema = z.object(miniAppShape);
+
+export type MiniAppEnv = z.infer<typeof miniAppEnvSchema>;
+
+/** Validates only what the Mini App API needs: no webhook secret, no LLM key. */
+export function getMiniAppEnv(source: EnvSource = process.env): MiniAppEnv {
+  const result = miniAppEnvSchema.safeParse(source);
   if (!result.success) {
     throw new EnvError(formatIssues(result.error));
   }

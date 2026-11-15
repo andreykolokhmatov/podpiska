@@ -6,19 +6,15 @@ import { Api } from 'grammy';
 
 import { createIssueNotifier } from '@/bot/notify';
 import { createBotDbStore } from '@/bot/store';
-import { collectForChannels, createDbStore, normalizeChannel, WebPreviewSource } from '@/collector';
+import { normalizeChannel } from '@/collector';
 import { closeDb, getDb } from '@/db';
 import { createLlm } from '@/llm/client';
 import { llmConfigFromEnv } from '@/llm/config';
 import { getBotEnv, getLlmEnv } from '@/lib/env';
 
+import { createPipelineDeps } from './deps';
 import { IssueFailedError, runIssuePipeline, type IssueStats } from './run';
-import {
-  createDigestDbStore,
-  createIssueDbStore,
-  replaceUserChannels,
-  upsertDevUser,
-} from './store';
+import { replaceUserChannels, upsertDevUser } from './store';
 
 const USAGE =
   'Usage: pnpm issue --user <telegram_id> [--days 1] [--channels @a @b ...] [--interests "..."] [--refresh-digests] [--notify]';
@@ -68,16 +64,8 @@ async function main(): Promise<number> {
     if (usernames !== undefined) {
       await replaceUserChannels(db, user.id, usernames);
     }
-    const source = new WebPreviewSource();
-    const channelStore = createDbStore(db);
     const result = await runIssuePipeline(
-      {
-        issues: createIssueDbStore(db),
-        digests: createDigestDbStore(db),
-        collect: (names, since) =>
-          collectForChannels(names, since, { source, store: channelStore }),
-        llm,
-        now: () => new Date(),
+      createPipelineDeps(db, llm, {
         log: (line) => console.log(line),
         ...(botEnv === undefined
           ? {}
@@ -91,7 +79,7 @@ async function main(): Promise<number> {
                 console.log(`notify: ${await notifier(notice)}`);
               },
             }),
-      },
+      }),
       {
         userId: user.id,
         days,

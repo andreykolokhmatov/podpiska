@@ -1,0 +1,217 @@
+/**
+ * Wire contract of the Mini App API (/api/app/*), shared by the route handlers and the client.
+ * Every request carries `Authorization: tma <initDataRaw>`. Every response is JSON with
+ * `Cache-Control: no-store`; failures are `{ error: ApiErrorCode, ... }` (see apiErrorSchema).
+ */
+import { z } from 'zod';
+
+export const AUTH_SCHEME = 'tma';
+
+export const INTERESTS_MAX = 500;
+export const CHANNEL_INPUT_MAX = 200;
+/** "Build now" presses per Moscow day per user (the owner has none). */
+export const DAILY_BUILDS = 3;
+export const ARCHIVE_PAGE_MAX = 50;
+
+export const issueStatuses = [
+  'pending',
+  'collecting',
+  'digesting',
+  'composing',
+  'ready',
+  'failed',
+] as const;
+export type IssueStatus = (typeof issueStatuses)[number];
+
+/**
+ * Progress shown on the MainButton:
+ * collecting → «Собираем посты…», digesting → «Читаем каналы N/M», composing → «Верстаем номер…».
+ */
+export const progressSteps = ['collecting', 'digesting', 'composing'] as const;
+export type ProgressStep = (typeof progressSteps)[number];
+
+/** Why a build failed (issue.error). */
+export const issueErrorCodes = [
+  'no_channels',
+  'no_posts',
+  'collect_failed',
+  'digest_failed',
+  'no_news',
+  'timeout',
+  'internal',
+] as const;
+export type IssueErrorCode = (typeof issueErrorCodes)[number];
+
+/** `error` of a non-2xx response. */
+export const apiErrorCodes = [
+  // 401: missing / bad / unsigned initData; `expired` = auth_date older than 24h (restart the app).
+  'unauthorized',
+  'expired',
+  // 400 malformed body or query; 404 unknown resource (incl. another user's issue).
+  'bad_request',
+  'not_found',
+  // 422 interests longer than INTERESTS_MAX after cleaning.
+  'too_long',
+  // POST /issues: 409 busy (see issueId), 429 limit (see quota) / limit_global, 422 no_channels.
+  'busy',
+  'limit',
+  'limit_global',
+  'no_channels',
+  // POST /channels, all 422: over MAX_CHANNELS_PER_USER (see limit), private/invite link,
+  // unparsable input, channel missing or web preview closed, t.me not answering.
+  'channel_limit',
+  'private',
+  'invalid',
+  'channel_not_found',
+  'retry_later',
+  // 500
+  'misconfigured',
+  'internal',
+] as const;
+export type ApiErrorCode = (typeof apiErrorCodes)[number];
+
+const isoDate = z.iso.datetime({ offset: true });
+
+export const quotaSchema = z.object({
+  limit: z.number().int(),
+  used: z.number().int(),
+  remaining: z.number().int(),
+});
+export type Quota = z.infer<typeof quotaSchema>;
+
+export const apiErrorSchema = z.object({
+  error: z.enum(apiErrorCodes),
+  /** busy: the issue already being built; resume polling it. */
+  issueId: z.uuid().optional(),
+  /** limit: today's usage. */
+  quota: quotaSchema.optional(),
+  /** channel_limit: the max channel count. */
+  limit: z.number().int().optional(),
+});
+export type ApiError = z.infer<typeof apiErrorSchema>;
+
+export const issueSummarySchema = z.object({
+  id: z.uuid(),
+  number: z.number().int(),
+  /** «15 ноября 2026». */
+  dateline: z.string(),
+  headline: z.string().nullable(),
+  createdAt: isoDate,
+});
+export type IssueSummary = z.infer<typeof issueSummarySchema>;
+
+export const issueStateSchema = z.object({
+  id: z.uuid(),
+  /** Effective status: an in-flight issue older than the stale limit is reported failed/timeout. */
+  status: z.enum(issueStatuses),
+  /** Non-null while in flight; done/total only for `digesting`. */
+  progress: z
+    .object({
+      step: z.enum(progressSteps),
+      done: z.number().int().nullable(),
+      total: z.number().int().nullable(),
+    })
+    .nullable(),
+  /** Non-null only when status is failed. */
+  error: z.enum(issueErrorCodes).nullable(),
+  /** Non-null only when ready. Open `/issue/<id>?tma=1&theme=<light|dark>`. */
+  number: z.number().int().nullable(),
+});
+export type IssueState = z.infer<typeof issueStateSchema>;
+
+export const channelViewSchema = z.object({
+  username: z.string(),
+  title: z.string().nullable(),
+  /** Expiring t.me CDN URL; render with referrerPolicy=no-referrer and an initials fallback. */
+  avatarUrl: z.string().nullable(),
+  /** false when the last collect could not read the channel. */
+  available: z.boolean(),
+});
+export type ChannelView = z.infer<typeof channelViewSchema>;
+
+// GET /api/app/me — upserts the user from initData; everything the hub needs in one call.
+export const meResponseSchema = z.object({
+  user: z.object({
+    telegramId: z.number().int(),
+    firstName: z.string().nullable(),
+    username: z.string().nullable(),
+  }),
+  onboarded: z.boolean(),
+  /** Owner (prod-signed initData only): no daily quota. */
+  owner: z.boolean(),
+  channels: z.object({ count: z.number().int(), limit: z.number().int() }),
+  hasInterests: z.boolean(),
+  /** Latest ready issue; null = checklist step 3 not done. */
+  latestIssue: issueSummarySchema.nullable(),
+  /** An issue being built right now: resume polling it. */
+  inFlight: issueStateSchema.nullable(),
+  /** null for the owner (hide «Осталось N из 3»). */
+  quota: quotaSchema.nullable(),
+});
+export type MeResponse = z.infer<typeof meResponseSchema>;
+
+// POST /api/app/onboarding — no body; idempotent.
+export const onboardingResponseSchema = z.object({ onboardedAt: isoDate });
+export type OnboardingResponse = z.infer<typeof onboardingResponseSchema>;
+
+// GET /api/app/channels
+export const channelsResponseSchema = z.object({
+  channels: z.array(channelViewSchema),
+  limit: z.number().int(),
+});
+export type ChannelsResponse = z.infer<typeof channelsResponseSchema>;
+
+// POST /api/app/channels — @username, t.me link or bare name. 201 added, 200 exists.
+export const addChannelRequestSchema = z.object({
+  input: z.string().trim().min(1).max(CHANNEL_INPUT_MAX),
+});
+export type AddChannelRequest = z.infer<typeof addChannelRequestSchema>;
+export const addChannelResponseSchema = z.object({
+  status: z.enum(['added', 'exists']),
+  channel: channelViewSchema,
+});
+export type AddChannelResponse = z.infer<typeof addChannelResponseSchema>;
+
+// DELETE /api/app/channels — unlinks only; 404 not_found if not subscribed.
+export const removeChannelRequestSchema = z.object({
+  username: z.string().trim().min(1).max(64),
+});
+export type RemoveChannelRequest = z.infer<typeof removeChannelRequestSchema>;
+export const removeChannelResponseSchema = z.object({ ok: z.literal(true) });
+export type RemoveChannelResponse = z.infer<typeof removeChannelResponseSchema>;
+
+// GET / PUT /api/app/interests — trimmed, control chars stripped, empty → null.
+export const interestsResponseSchema = z.object({
+  interests: z.string().nullable(),
+  maxLength: z.number().int(),
+});
+export type InterestsResponse = z.infer<typeof interestsResponseSchema>;
+export const putInterestsRequestSchema = z.object({
+  // Raw input; the INTERESTS_MAX limit applies after cleaning (422 too_long).
+  interests: z.string().max(INTERESTS_MAX * 2),
+});
+export type PutInterestsRequest = z.infer<typeof putInterestsRequestSchema>;
+
+// GET /api/app/issues?before=<number>&limit=<1..50> — ready issues, newest first.
+export const issuesQuerySchema = z.object({
+  before: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(ARCHIVE_PAGE_MAX).default(20),
+});
+export type IssuesQuery = z.infer<typeof issuesQuerySchema>;
+export const issuesResponseSchema = z.object({
+  issues: z.array(issueSummarySchema),
+  /** Pass as `before` for the next page; null = no more. */
+  nextBefore: z.number().int().nullable(),
+});
+export type IssuesResponse = z.infer<typeof issuesResponseSchema>;
+
+// POST /api/app/issues — no body. 202 started; then poll GET /api/app/issues/<id>.
+export const buildResponseSchema = z.object({
+  issue: issueStateSchema,
+  quota: quotaSchema.nullable(),
+});
+export type BuildResponse = z.infer<typeof buildResponseSchema>;
+
+// GET /api/app/issues/<id> — 404 not_found for a foreign or malformed id.
+export const issueResponseSchema = z.object({ issue: issueStateSchema });
+export type IssueResponse = z.infer<typeof issueResponseSchema>;

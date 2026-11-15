@@ -6,7 +6,14 @@ import type { CollectResult } from '@/collector';
 import { now, seedStores, validDraft } from './__fixtures__/compose-fixtures';
 import { mockStage } from './__fixtures__/fakes';
 import { COMPOSE_PROMPT_VERSION, DIGEST_PROMPT_VERSION } from './prompts';
-import { IssueFailedError, runIssuePipeline, type PipelineDeps } from './run';
+import {
+  executeIssueRun,
+  IssueFailedError,
+  newIssueRun,
+  planIssuePeriod,
+  runIssuePipeline,
+  type PipelineDeps,
+} from './run';
 
 const okCollect = async (usernames: readonly string[]): Promise<CollectResult[]> =>
   usernames.map((username) => ({ username, ok: true, collected: 1, inserted: 0 }));
@@ -214,5 +221,73 @@ describe('runIssuePipeline', () => {
     await expect(issues.transition(record.id, 'digesting', 'composing')).rejects.toThrow(
       /not in status/,
     );
+  });
+});
+
+describe('executeIssueRun', () => {
+  const claim = async (deps: PipelineDeps, issues: ReturnType<typeof setup>['issues']) => {
+    const period = await planIssuePeriod(deps, { userId: 1, days: 1 });
+    const record = await issues.create(1, period);
+    return newIssueRun(deps, { issueId: record.id, userId: 1, period, interests: null });
+  };
+
+  it('matches runIssuePipeline for a pre-created issue', async () => {
+    const a = setup(() => JSON.stringify(validDraft()));
+    const viaPipeline = await runIssuePipeline(a.deps, input);
+    const b = setup(() => JSON.stringify(validDraft()));
+    const viaExecute = await executeIssueRun(b.deps, await claim(b.deps, b.issues));
+
+    expect(viaExecute.number).toBe(viaPipeline.number);
+    expect(viaExecute.content).toEqual(viaPipeline.content);
+    expect(viaExecute.stats).toEqual(viaPipeline.stats);
+    expect(b.issues.issues.get(viaExecute.issueId)?.history).toEqual(
+      a.issues.issues.get(viaPipeline.issueId)?.history,
+    );
+  });
+
+  it('fails as timeout between steps once the deadline passed', async () => {
+    const { deps, issues, smart } = setup(() => JSON.stringify(validDraft()));
+    let clock = now.getTime();
+    const ticking = { ...deps, now: () => new Date((clock += 1000)) };
+    const run = await claim(ticking, issues);
+    const deadline = new Date(clock + 2500);
+
+    const error = await executeIssueRun(ticking, run, { deadline }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IssueFailedError);
+    expect((error as Error).message).toMatch(/^timeout:/);
+    const record = issues.issues.get(run.issueId);
+    expect(record?.status).toBe('failed');
+    expect(record?.error).toMatch(/^timeout:/);
+    expect(smart.model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it('stops digesting mid-way at the deadline', async () => {
+    const { deps, issues } = setup(() => JSON.stringify(validDraft()));
+    const run = await claim(deps, issues);
+    let calls = 0;
+    // Deadline passes after collect, while digest tasks remain.
+    const timed = {
+      ...deps,
+      now: () => {
+        calls += 1;
+        return new Date(now.getTime() + (calls > 3 ? 10_000 : 0));
+      },
+    };
+    const error = await executeIssueRun(timed, run, {
+      deadline: new Date(now.getTime() + 5000),
+    }).catch((e: unknown) => e);
+    expect((error as Error).message).toMatch(/^timeout:/);
+    expect(issues.issues.get(run.issueId)?.history).toContain('digesting');
+    expect(issues.issues.get(run.issueId)?.history).not.toContain('composing');
+  });
+
+  it('skips notify when notifyAllowed is false', async () => {
+    const { deps, issues } = setup(() => JSON.stringify(validDraft()));
+    const notify = vi.fn(async () => undefined);
+    const result = await executeIssueRun({ ...deps, notify }, await claim(deps, issues), {
+      notifyAllowed: false,
+    });
+    expect(issues.issues.get(result.issueId)?.status).toBe('ready');
+    expect(notify).not.toHaveBeenCalled();
   });
 });

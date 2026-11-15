@@ -6,13 +6,13 @@ import { createIssueNotifier, issueReadyMessage, type NotifierDeps } from './not
 const APP_URL = 'https://podpiska.example.com';
 const notice = { issueId: '0b1c2d3e-0000-4000-8000-000000000001', userId: 7, number: 4 };
 
-const apiError = (code: number, retryAfter?: number) =>
+const apiError = (code: number, retryAfter?: number, description = `error ${code}`) =>
   new GrammyError(
     'call failed',
     {
       ok: false,
       error_code: code,
-      description: `error ${code}`,
+      description,
       ...(retryAfter === undefined ? {} : { parameters: { retry_after: retryAfter } }),
     },
     'sendMessage',
@@ -67,12 +67,22 @@ describe('createIssueNotifier', () => {
     ]);
   });
 
-  it('marks the user blocked on 403 and does not throw', async () => {
+  it('marks the user blocked on 403 "blocked by the user" and does not throw', async () => {
     const { notify, store, claimed } = setup(async () => {
-      throw apiError(403);
+      throw apiError(403, undefined, 'Forbidden: bot was blocked by the user');
     });
     await expect(notify(notice)).resolves.toBe('blocked');
     expect(store.markBlocked).toHaveBeenCalledWith(7);
+    expect(store.releaseNotify).not.toHaveBeenCalled();
+    expect(claimed.has(notice.issueId)).toBe(true);
+  });
+
+  it('does not mark blocked when the bot cannot initiate the conversation', async () => {
+    const { notify, store, claimed } = setup(async () => {
+      throw apiError(403, undefined, "Forbidden: bot can't initiate conversation with a user");
+    });
+    await expect(notify(notice)).resolves.toBe('unreachable');
+    expect(store.markBlocked).not.toHaveBeenCalled();
     expect(store.releaseNotify).not.toHaveBeenCalled();
     expect(claimed.has(notice.issueId)).toBe(true);
   });

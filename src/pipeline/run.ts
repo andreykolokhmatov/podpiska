@@ -5,7 +5,7 @@ import { addUsage, emptyUsage, type TokenUsage } from '@/llm/usage';
 import { composeIssue } from './compose';
 import { issueWindow, mskDayRange, type Period } from './day';
 import { summarizeChannelDay } from './digest';
-import { NoPostsError, PipelineError, safeMessage } from './errors';
+import { DeadlineError, NoPostsError, PipelineError, safeMessage } from './errors';
 import { COMPOSE_PROMPT_VERSION, DIGEST_PROMPT_VERSION } from './prompts';
 import type { DroppedStats } from './resolve';
 import type { Issue } from './schema';
@@ -81,26 +81,69 @@ const collectStart = (period: Period): Date => {
   return mskDayRange(first).start;
 };
 
-export async function createIssueRecord(
-  deps: PipelineDeps,
-  input: { userId: number; days: number; interests: string | null; refreshDigests?: boolean },
-): Promise<IssueRun> {
+export interface IssueRunInput {
+  userId: number;
+  days: number;
+  interests: string | null;
+  refreshDigests?: boolean;
+}
+
+/** The window of the user's next issue (a daily one continues from the last ready issue). */
+export async function planIssuePeriod(
+  deps: Pick<PipelineDeps, 'issues' | 'now'>,
+  input: { userId: number; days: number },
+): Promise<Period> {
   const previousEnd =
     input.days === 1 ? await deps.issues.lastReadyPeriodEnd(input.userId) : undefined;
-  const period = issueWindow({ days: input.days, now: deps.now(), previousEnd });
-  const issue = await deps.issues.create(input.userId, period);
+  return issueWindow({ days: input.days, now: deps.now(), previousEnd });
+}
+
+/** Run state for an issue row that already exists in status pending. */
+export function newIssueRun(
+  deps: Pick<PipelineDeps, 'llm'>,
+  input: {
+    issueId: string;
+    userId: number;
+    period: Period;
+    interests: string | null;
+    refreshDigests?: boolean;
+  },
+): IssueRun {
   return {
-    issueId: issue.id,
+    issueId: input.issueId,
     userId: input.userId,
     interests: input.interests,
-    period,
+    period: input.period,
     channels: [],
     stats: newStats(deps.llm),
     options: { refreshDigests: input.refreshDigests ?? false },
-    collectSince: collectStart(period),
+    collectSince: collectStart(input.period),
     collected: new Set(),
   };
 }
+
+export async function createIssueRecord(
+  deps: PipelineDeps,
+  input: IssueRunInput,
+): Promise<IssueRun> {
+  const period = await planIssuePeriod(deps, input);
+  const issue = await deps.issues.create(input.userId, period);
+  return newIssueRun(deps, { ...input, issueId: issue.id, period });
+}
+
+export interface ExecuteOptions {
+  /** Past this instant the run stops between steps (or digest tasks) as failed('timeout'). */
+  deadline?: Date;
+  /** false skips the "issue ready" message (the user never allowed the bot to write). */
+  notifyAllowed?: boolean;
+}
+
+const pastDeadline = (deps: Pick<PipelineDeps, 'now'>, options: ExecuteOptions): boolean =>
+  options.deadline !== undefined && deps.now().getTime() >= options.deadline.getTime();
+
+const checkDeadline = (deps: Pick<PipelineDeps, 'now'>, options: ExecuteOptions): void => {
+  if (pastDeadline(deps, options)) throw new DeadlineError();
+};
 
 export async function runCollectStep(deps: PipelineDeps, run: IssueRun): Promise<void> {
   await deps.issues.transition(run.issueId, 'pending', 'collecting');
@@ -144,7 +187,11 @@ export async function runCollectStep(deps: PipelineDeps, run: IssueRun): Promise
   }
 }
 
-export async function runDigestStep(deps: PipelineDeps, run: IssueRun): Promise<void> {
+export async function runDigestStep(
+  deps: PipelineDeps,
+  run: IssueRun,
+  options: ExecuteOptions = {},
+): Promise<void> {
   const tasks = run.channels.flatMap((channel) => run.period.days.map((day) => ({ channel, day })));
   const digests = run.stats.digests;
   digests.total = tasks.length;
@@ -159,7 +206,7 @@ export async function runDigestStep(deps: PipelineDeps, run: IssueRun): Promise<
   // period.end precedes the collect start, so every post up to it was scraped.
   const watermark = run.period.end;
   const worker = async (): Promise<void> => {
-    while (next < tasks.length) {
+    while (next < tasks.length && !pastDeadline(deps, options)) {
       const task = tasks[next];
       next += 1;
       if (task === undefined) continue;
@@ -193,6 +240,7 @@ export async function runDigestStep(deps: PipelineDeps, run: IssueRun): Promise<
   };
   const workers = Math.max(1, Math.min(deps.digestConcurrency ?? 3, tasks.length));
   await Promise.all(Array.from({ length: workers }, () => worker()));
+  if (done < tasks.length) throw new DeadlineError();
 
   deps.log?.(
     `digest: ${digests.total} total, ${digests.cached} cached, ${digests.generated} generated, ${digests.empty} empty, ${digests.failed} failed`,
@@ -241,17 +289,19 @@ export interface PipelineResult {
   stats: IssueStats;
 }
 
-/** Runs every step in-process; each step is resumable on its own (QStash later). */
-export async function runIssuePipeline(
+/** Runs the steps of an existing pending issue; marks it failed on any error. */
+export async function executeIssueRun(
   deps: PipelineDeps,
-  input: { userId: number; days: number; interests: string | null; refreshDigests?: boolean },
+  run: IssueRun,
+  options: ExecuteOptions = {},
 ): Promise<PipelineResult> {
-  const run = await createIssueRecord(deps, input);
-  deps.log?.(`issue ${run.issueId}: pending`);
   let result: PipelineResult;
   try {
+    checkDeadline(deps, options);
     await runCollectStep(deps, run);
-    await runDigestStep(deps, run);
+    checkDeadline(deps, options);
+    await runDigestStep(deps, run, options);
+    checkDeadline(deps, options);
     const { number, content } = await runComposeStep(deps, run);
     result = { issueId: run.issueId, number, content, stats: run.stats };
   } catch (error) {
@@ -265,7 +315,7 @@ export async function runIssuePipeline(
     throw new IssueFailedError(run.issueId, message, run.stats);
   }
 
-  if (deps.notify !== undefined) {
+  if (deps.notify !== undefined && options.notifyAllowed !== false) {
     try {
       await deps.notify({ issueId: result.issueId, userId: run.userId, number: result.number });
     } catch (error) {
@@ -273,6 +323,16 @@ export async function runIssuePipeline(
     }
   }
   return result;
+}
+
+/** Creates the issue and runs every step in-process (CLI); steps stay resumable on their own. */
+export async function runIssuePipeline(
+  deps: PipelineDeps,
+  input: IssueRunInput,
+): Promise<PipelineResult> {
+  const run = await createIssueRecord(deps, input);
+  deps.log?.(`issue ${run.issueId}: pending`);
+  return executeIssueRun(deps, run);
 }
 
 export class IssueFailedError extends Error {

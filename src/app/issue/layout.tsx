@@ -6,6 +6,8 @@ import { THEME_SCRIPT } from '@/newspaper/theme-script';
 
 import '@/newspaper/newspaper.css';
 
+import { MiniAppBridge } from '@/miniapp/client/MiniAppBridge';
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -21,6 +23,7 @@ export default function IssueLayout({ children }: { children: ReactNode }) {
     <div className={newspaperFontVars}>
       {children}
       <script>{THEME_SCRIPT}</script>
+      <MiniAppBridge />
     </div>
   );
 }

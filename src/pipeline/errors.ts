@@ -30,6 +30,13 @@ export class LeadUnsourcedError extends PipelineError {
   }
 }
 
+export class DeadlineError extends PipelineError {
+  override readonly name = 'DeadlineError';
+  constructor(message = 'timeout: the issue took too long to build') {
+    super('timeout', message);
+  }
+}
+
 export class StatusTransitionError extends PipelineError {
   override readonly name = 'StatusTransitionError';
   constructor(id: string, from: string, to: string) {

@@ -55,6 +55,34 @@ Telegram Mini App. Бот присылает свежий выпуск.
    pnpm dev
    ```
 
+## Mini App
+
+Весь продукт — Telegram Mini App по адресу `APP_URL` (корень сайта). Бот только открывает её
+и присылает уведомление о готовом выпуске.
+
+1. Примените миграции (Mini App хранит отметку онбординга в `users.onboarded_at`):
+   ```sh
+   pnpm db:migrate
+   ```
+2. В [@BotFather](https://t.me/BotFather) для бота из `TELEGRAM_BOT_TOKEN`:
+   - **Bot Settings → Configure Mini App → Enable Mini App**, URL = `APP_URL`
+     (например `https://podpiska-news.vercel.app`) — это Main Mini App, кнопка «Открыть» в
+     профиле бота;
+   - **Bot Settings → Menu Button**, URL = тот же `APP_URL`.
+3. Необязательно, в `.env` / Vercel:
+   - `TELEGRAM_DEV_BOT_TOKEN` — токен второго (dev) бота, у которого в BotFather указан тот же
+     `APP_URL`. Его initData принимается API, но владельцем он никогда не считается.
+   - `OWNER_TELEGRAM_ID` — ваш числовой Telegram id: без дневного лимита «Собрать выпуск»
+     (только когда Mini App открыта из основного бота).
+   - `MAX_BUILDS_PER_DAY_GLOBAL` — общий дневной лимит сборок на всех (по умолчанию 30).
+
+Mini App работает только внутри Telegram: в обычном браузере `/` показывает «Откройте в
+Telegram» и не обращается к API. Газета `/issue/<id>` и `/privacy` открываются и в браузере.
+
+Для вёрстки без Telegram есть dev-мок (только `pnpm dev`, в production-сборку не попадает):
+`http://localhost:3000/?mock=1&theme=dark&scenario=hub` — подменяет окружение Telegram и
+ответы API фикстурами; `scenario` = `onboarding` | `hub` | `done` | `building` | `fresh`.
+
 ## Скрипты
 
 | Команда            | Что делает                                       |
