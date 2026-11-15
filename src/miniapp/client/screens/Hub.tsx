@@ -181,7 +181,7 @@ function BuildStatus({ state, channelCount }: { state: BuildState; channelCount:
       return (
         <Cell
           Component="div"
-          before={<ColorIcon icon={CircleAlert} color="red" />}
+          before={<ColorIcon icon={CircleAlert} color="red" size={40} />}
           subtitle={failureText(state.failure, channelCount)}
           multiline
         >
@@ -192,7 +192,7 @@ function BuildStatus({ state, channelCount }: { state: BuildState; channelCount:
       return (
         <Cell
           Component="div"
-          before={<ColorIcon icon={Hourglass} color="orange" />}
+          before={<ColorIcon icon={Hourglass} color="orange" size={40} />}
           subtitle={t.hub.slowSubtitle}
           multiline
         >

@@ -149,11 +149,12 @@ html * {
   line-height: 1.3;
 }
 
+/* Same box as the issue card's 40px icon, so status and issue texts share one left edge. */
 .pd-status-spinner {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
 }
 
 /* Section header with a trailing text action («Изменить» / «Готово»), like iOS list headers. */
