@@ -220,3 +220,44 @@ export function getMiniAppEnv(source: EnvSource = process.env): MiniAppEnv {
   }
   return result.data;
 }
+
+const promoEnvSchema = z.object({
+  // The bot named in the "build your own newspaper" plate; unset = no plate (self-host default).
+  TELEGRAM_BOT_USERNAME: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_]{5,32}$/, 'must be a bot username without @ (5-32 chars of A-Z, 0-9, _)')
+      .optional(),
+  ),
+});
+
+export type PromoEnv = z.infer<typeof promoEnvSchema>;
+
+/** Validates only the optional promo plate variable. */
+export function getPromoEnv(source: EnvSource = process.env): PromoEnv {
+  const result = promoEnvSchema.safeParse(source);
+  if (!result.success) {
+    throw new EnvError(formatIssues(result.error));
+  }
+  return result.data;
+}
+
+const pdfEnvSchema = z.object({
+  // Keys the HMAC of PDF links; the page is rendered from APP_URL, never from the Host header.
+  TELEGRAM_BOT_TOKEN: telegramBotToken,
+  APP_URL: botShape.APP_URL,
+  // Local dev only: a Chrome/Chromium binary instead of the bundled @sparticuz/chromium.
+  CHROME_EXECUTABLE_PATH: optionalString(),
+});
+
+export type PdfEnv = z.infer<typeof pdfEnvSchema>;
+
+/** Validates only what PDF links and the PDF route need. */
+export function getPdfEnv(source: EnvSource = process.env): PdfEnv {
+  const result = pdfEnvSchema.safeParse(source);
+  if (!result.success) {
+    throw new EnvError(formatIssues(result.error));
+  }
+  return result.data;
+}

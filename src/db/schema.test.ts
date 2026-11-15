@@ -52,6 +52,12 @@ describe('schema', () => {
     expect(issueStatuses).toHaveLength(6);
   });
 
+  it('issues.deleted_at is a nullable timestamptz (soft delete)', () => {
+    const column = getTableConfig(issues).columns.find((c) => c.name === 'deleted_at');
+    expect(column?.getSQLType()).toBe('timestamp with time zone');
+    expect(column?.notNull).toBe(false);
+  });
+
   it('all foreign keys cascade on delete', () => {
     const tables = [userChannels, posts, channelDigests, issues];
     const actions = tables.flatMap((table) =>

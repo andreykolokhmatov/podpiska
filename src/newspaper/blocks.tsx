@@ -1,6 +1,7 @@
 import type { Issue as IssueDoc } from '@/pipeline/schema';
 
 import { Byline } from './Byline';
+import type { NewspaperPromo } from './promo';
 import { countLine, effectiveLayout, splitFeatureStories, unitKey, visibleFacts } from './format';
 
 type Lead = IssueDoc['lead'];
@@ -262,11 +263,29 @@ export function Events({ events }: { events: readonly EventData[] }) {
   );
 }
 
-export function Colophon({ text, number }: { text: string; number: number }) {
+interface ColophonProps {
+  text: string;
+  number: number;
+  promo?: NewspaperPromo | null | undefined;
+}
+
+export function Colophon({ text, number, promo }: ColophonProps) {
   return (
     <footer>
       <div className="colophon">{text}</div>
       <div className="end">Подписка · № {number}</div>
+      {promo ? (
+        <a
+          className="promo"
+          href={promo.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-promo-bot={promo.botUsername}
+        >
+          <span className="promo__lead">Соберите свою газету</span>{' '}
+          <span className="promo__bot">→ @{promo.botUsername}</span>
+        </a>
+      ) : null}
     </footer>
   );
 }

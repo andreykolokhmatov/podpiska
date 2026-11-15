@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { initials, issueUrl, looksLikeTma, uiPlatform } from './env';
+import {
+  initials,
+  issueUrl,
+  looksLikeTma,
+  sessionFlagStore,
+  takeStartIssue,
+  uiPlatform,
+  type FlagStore,
+} from './env';
 
 describe('uiPlatform', () => {
   it('ios look for iOS and macOS, base for the rest', () => {
@@ -35,5 +43,55 @@ describe('initials', () => {
     expect(initials('андрей', 'к')).toBe('АК');
     expect(initials('Новости Омска')).toBe('Н');
     expect(initials(null)).toBe('?');
+  });
+});
+
+describe('takeStartIssue', () => {
+  const ID = '6f1c2e9a-3b4d-4c5e-8f70-1a2b3c4d5e6f';
+  const memory = (): FlagStore => {
+    let value: string | null = null;
+    return { get: () => value, set: (v) => void (value = v) };
+  };
+
+  it('routes an issue link once, then never again in this session', () => {
+    const store = memory();
+    expect(takeStartIssue(`issue_${ID}`, store)).toBe(ID);
+    expect(takeStartIssue(`issue_${ID}`, store)).toBeNull();
+  });
+
+  it('ignores missing or junk start params and does not consume them', () => {
+    const store = memory();
+    for (const junk of [undefined, '', 'issue_x', `issue_${ID}x`, `ref_${ID}`]) {
+      expect(takeStartIssue(junk, store)).toBeNull();
+    }
+    expect(store.get()).toBeNull();
+  });
+
+  it('a different issue link in the same session still routes', () => {
+    const store = memory();
+    takeStartIssue(`issue_${ID}`, store);
+    const other = '00000000-0000-4000-8000-000000000001';
+    expect(takeStartIssue(`issue_${other}`, store)).toBe(other);
+  });
+});
+
+describe('sessionFlagStore', () => {
+  it('falls back to memory when storage throws', () => {
+    const store = sessionFlagStore('k', () => {
+      throw new Error('blocked');
+    });
+    expect(store.get()).toBeNull();
+    store.set('v');
+    expect(store.get()).toBe('v');
+  });
+
+  it('persists to storage when it works', () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+    } as unknown as Storage;
+    sessionFlagStore('k', () => storage).set('v');
+    expect(sessionFlagStore('k', () => storage).get()).toBe('v');
   });
 });

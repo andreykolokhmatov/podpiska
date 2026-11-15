@@ -2,6 +2,12 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Both are on Next's built-in list already; kept explicit because the PDF route depends on it.
+  serverExternalPackages: ['puppeteer-core', '@sparticuz/chromium'],
+  // The Brotli-packed Chromium is read from disk at runtime, so tracing cannot see it.
+  outputFileTracingIncludes: {
+    '/api/issues/\\[id\\]/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
+  },
   async headers() {
     return [
       {

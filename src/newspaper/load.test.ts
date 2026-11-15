@@ -25,6 +25,12 @@ describe('resolveIssueView', () => {
     },
   );
 
+  it('soft-deleted → not-found, whatever the status', () => {
+    const deletedAt = new Date('2026-11-15T10:00:00Z');
+    expect(resolveIssueView(row({ deletedAt }))).toEqual({ kind: 'not-found' });
+    expect(resolveIssueView(row({ deletedAt: null })).kind).toBe('ready');
+  });
+
   it('failed → failed', () => {
     expect(resolveIssueView(row({ status: 'failed' }))).toEqual({ kind: 'failed' });
   });

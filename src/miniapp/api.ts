@@ -20,14 +20,18 @@ import {
   type ApiErrorCode,
   type BuildResponse,
   type ChannelsResponse,
+  type DeleteIssueResponse,
   type InterestsResponse,
   type IssueResponse,
   type IssueSummary,
   type IssuesResponse,
   type MeResponse,
   type OnboardingResponse,
+  type PdfLinkResponse,
   type RemoveChannelResponse,
+  type ShareIssueResponse,
 } from './contract';
+import type { PdfLink } from './pdf-link';
 import {
   errorCode,
   issueState,
@@ -49,8 +53,23 @@ export interface AppApiDeps {
   pipeline: () => PipelineDeps;
   /** Runs work after the response is sent (next/server `after`). */
   schedule: (task: () => Promise<void>) => void;
+  /**
+   * savePreparedInlineMessage through the bot that signed the initData (its users can only be
+   * reached by that bot); returns the prepared message id. Throws on any Bot API failure.
+   */
+  share: (input: ShareRequest) => Promise<string>;
+  /** Signed public PDF URL; throws EnvError when the PDF env is invalid. */
+  pdfLink: (input: { issueId: string; number: number }) => PdfLink;
   /** Metadata only: never initData, interests or tokens. */
   log: (line: string) => void;
+}
+
+export interface ShareRequest {
+  bot: MiniAppAuth['bot'];
+  telegramUserId: number;
+  issueId: string;
+  number: number;
+  headline: string | null;
 }
 
 export type Handler = (req: Request) => Promise<Response>;
@@ -65,8 +84,13 @@ export interface AppApi {
   putInterests: Handler;
   listIssues: Handler;
   buildIssue: Handler;
-  getIssue: (req: Request, id: string) => Promise<Response>;
+  getIssue: IdHandler;
+  deleteIssue: IdHandler;
+  shareIssue: IdHandler;
+  pdfLink: IdHandler;
 }
+
+export type IdHandler = (req: Request, id: string) => Promise<Response>;
 
 const MAX_BODY_BYTES = 2048;
 
@@ -152,7 +176,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     owner: boolean;
   }
 
-  const authenticate = async (req: Request): Promise<Session> => {
+  const verify = (req: Request) => {
     const env = deps.env();
     const raw = parseAuthHeader(req.headers.get('authorization'));
     if (raw === undefined) throw fail(401, 'unauthorized');
@@ -162,8 +186,13 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       now: deps.now(),
     });
     if (!result.ok) throw fail(401, result.error);
-    const user = await deps.store.upsertUser(result.auth.user);
-    return { auth: result.auth, user, env, owner: isOwner(result.auth, env.OWNER_TELEGRAM_ID) };
+    return { auth: result.auth, env };
+  };
+
+  const authenticate = async (req: Request): Promise<Session> => {
+    const { auth, env } = verify(req);
+    const user = await deps.store.upsertUser(auth.user);
+    return { auth, user, env, owner: isOwner(auth, env.OWNER_TELEGRAM_ID) };
   };
 
   const route =
@@ -369,12 +398,55 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     return json(202, body);
   });
 
+  // Also the owner check on a shared newspaper: verifies initData without registering the reader.
   const getIssue = route('issues.get', async (req, id: string) => {
-    const { user } = await authenticate(req);
+    const { auth } = verify(req);
     if (!uuidSchema.safeParse(id).success) throw fail(404, 'not_found');
+    const user = await deps.store.findUser(auth.user.id);
+    if (user === undefined) throw fail(404, 'not_found');
     const row = await deps.store.getIssue(user.id, id);
     if (row === undefined) throw fail(404, 'not_found');
     const body: IssueResponse = { issue: issueState(row, deps.now()) };
+    return json(200, body);
+  });
+
+  const deleteIssue = route('issues.delete', async (req, id: string) => {
+    const { user } = await authenticate(req);
+    if (!uuidSchema.safeParse(id).success) throw fail(404, 'not_found');
+    const result = await deps.store.softDeleteIssue(user.id, id);
+    if (result === 'not_found') throw fail(404, 'not_found');
+    if (result === 'busy') throw fail(409, 'busy', { issueId: id });
+    deps.log(`[app] issue ${id}: deleted`);
+    const body: DeleteIssueResponse = { ok: true };
+    return json(200, body);
+  });
+
+  /** The user's own ready, non-deleted issue; anything else is 404 before any side effect. */
+  const readyIssue = async (userId: number, id: string): Promise<ReadyIssueRow> => {
+    if (!uuidSchema.safeParse(id).success) throw fail(404, 'not_found');
+    const row = await deps.store.getReadyIssue(userId, id);
+    if (row === undefined) throw fail(404, 'not_found');
+    return row;
+  };
+
+  const shareIssue = route('issues.share', async (req, id: string) => {
+    const { auth, user } = await authenticate(req);
+    const row = await readyIssue(user.id, id);
+    const preparedMessageId = await deps.share({
+      bot: auth.bot,
+      telegramUserId: auth.user.id,
+      issueId: row.id,
+      number: row.number,
+      headline: issueSummary(row).headline,
+    });
+    const body: ShareIssueResponse = { preparedMessageId };
+    return json(200, body);
+  });
+
+  const pdfLink = route('issues.pdf_link', async (req, id: string) => {
+    const { user } = await authenticate(req);
+    const row = await readyIssue(user.id, id);
+    const body: PdfLinkResponse = deps.pdfLink({ issueId: row.id, number: row.number });
     return json(200, body);
   });
 
@@ -389,5 +461,8 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     listIssues,
     buildIssue,
     getIssue,
+    deleteIssue,
+    shareIssue,
+    pdfLink,
   };
 }

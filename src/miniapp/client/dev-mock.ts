@@ -4,6 +4,7 @@
  * builds never include it.
  *
  * Query: mock=1 · theme=light|dark · scenario=onboarding|hub|done|building|fresh
+ * Newspaper owner buttons: /issue/<ISSUE_ID>?tma=1&mock=1 (needs a real issue row to render).
  */
 import { emitEvent, mockTelegramEnv } from '@tma.js/sdk-react';
 
@@ -120,6 +121,7 @@ function createBackend(scenario: Scenario): FetchLike {
     ? 'Коротко про новости Омска, больше про экономику'
     : null;
   let polls = 0;
+  let issues = scenario === 'fresh' ? [] : [...ISSUES];
 
   const buildState = (): IssueState => {
     polls += 1;
@@ -188,15 +190,48 @@ function createBackend(scenario: Scenario): FetchLike {
         interests = field('interests').trim() || null;
         return json(200, { interests, maxLength: 500 });
       case 'GET /api/app/issues':
-        return json(200, { issues: scenario === 'fresh' ? [] : ISSUES, nextBefore: null });
+        return json(200, { issues, nextBefore: null });
       case 'POST /api/app/issues':
         return json(202, { issue: buildState(), quota: { limit: 3, used: 2, remaining: 1 } });
       case `GET /api/app/issues/${BUILD_ID}`:
         return json(200, { issue: buildState() });
       default:
-        return json(404, { error: 'not_found' });
+        return issueRoute(method, url.pathname);
     }
   };
+
+  function issueRoute(method: string, pathname: string): Response {
+    const match = /^\/api\/app\/issues\/([0-9a-f-]{36})(\/share|\/pdf-link)?$/.exec(pathname);
+    const issue = issues.find((i) => i.id === match?.[1]);
+    if (!match || !issue) return json(404, { error: 'not_found' });
+    switch (`${method} ${match[2] ?? ''}`) {
+      case 'GET ':
+        return json(200, {
+          issue: {
+            id: issue.id,
+            status: 'ready',
+            progress: null,
+            error: null,
+            number: issue.number,
+          },
+        });
+      case 'DELETE ':
+        // Second-oldest issue stands in for one still being built.
+        if (issue.number === 2) return json(409, { error: 'busy' });
+        issues = issues.filter((i) => i.id !== issue.id);
+        if (me.latestIssue?.id === issue.id) me.latestIssue = issues[0] ?? null;
+        return json(200, { ok: true });
+      case 'POST /share':
+        return json(200, { preparedMessageId: 'dev-mock-prepared' });
+      case 'POST /pdf-link':
+        return json(200, {
+          url: `https://example.com/api/issues/${issue.id}/pdf?exp=0&sig=dev`,
+          fileName: `Podpiska-${issue.number}.pdf`,
+        });
+      default:
+        return json(404, { error: 'not_found' });
+    }
+  }
 }
 
 /** Visual stand-ins for the native buttons Telegram would draw outside the WebView. */
@@ -218,6 +253,14 @@ function nativeChrome(theme: (typeof THEMES)[keyof typeof THEMES]) {
     zIndex: '1000',
   });
   main.onclick = () => emitEvent('main_button_pressed');
+  const secondary = main.cloneNode() as HTMLButtonElement;
+  secondary.id = 'mock-secondary-button';
+  Object.assign(secondary.style, {
+    bottom: '74px',
+    background: theme.section_bg_color,
+    color: theme.button_color,
+  });
+  secondary.onclick = () => emitEvent('secondary_button_pressed');
   const back = document.createElement('button');
   back.id = 'mock-back-button';
   back.textContent = '‹ Назад';
@@ -236,7 +279,7 @@ function nativeChrome(theme: (typeof THEMES)[keyof typeof THEMES]) {
     zIndex: '1000',
   });
   back.onclick = () => emitEvent('back_button_pressed');
-  document.body.append(main, back);
+  document.body.append(main, secondary, back);
   document.body.style.paddingBottom = '74px';
   document.body.style.paddingTop = '36px';
 
@@ -248,6 +291,11 @@ function nativeChrome(theme: (typeof THEMES)[keyof typeof THEMES]) {
       main.style.backgroundImage = params.has_shine_effect
         ? 'linear-gradient(100deg, transparent 30%, rgba(255,255,255,.25) 50%, transparent 70%)'
         : '';
+    },
+    secondary(params: Record<string, unknown>) {
+      secondary.style.display = params.is_visible ? 'block' : 'none';
+      secondary.textContent = params.is_progress_visible ? '…' : String(params.text ?? '');
+      document.body.style.paddingBottom = params.is_visible ? '136px' : '74px';
     },
     back(params: Record<string, unknown>) {
       back.style.display = params.is_visible ? 'block' : 'none';
@@ -310,6 +358,20 @@ export function installDevMock(search: string): FetchLike {
           return;
         case 'web_app_setup_main_button':
           chrome.main(params);
+          return;
+        case 'web_app_setup_secondary_button':
+          chrome.secondary(params);
+          return;
+        case 'web_app_send_prepared_message':
+          if (window.confirm('Поделиться выпуском? (dev mock)')) emitEvent('prepared_message_sent');
+          else emitEvent('prepared_message_failed', { error: 'USER_DECLINED' });
+          return;
+        case 'web_app_request_file_download':
+          emitEvent('file_download_requested', {
+            status: window.confirm(`Скачать ${String(params.file_name ?? '')}? (dev mock)`)
+              ? 'downloading'
+              : 'cancelled',
+          });
           return;
         case 'web_app_setup_back_button':
           chrome.back(params);

@@ -17,7 +17,14 @@ import {
 
 import { configureApi, type FetchLike } from './api';
 import { loadDevMock, wantsDevMock } from './devMock';
-import { uiPlatform, type UiPlatform } from './env';
+import {
+  issueUrl,
+  sessionFlagStore,
+  START_CONSUMED_KEY,
+  takeStartIssue,
+  uiPlatform,
+  type UiPlatform,
+} from './env';
 
 export interface TmaUser {
   firstName: string;
@@ -28,7 +35,11 @@ export interface TmaUser {
 export interface TmaEnv {
   platform: UiPlatform;
   user: TmaUser | null;
+  /** Set when launched by an `issue_<uuid>` link: open this URL instead of rendering a screen. */
+  redirect: string | null;
 }
+
+const startFlag = sessionFlagStore(START_CONSUMED_KEY, () => window.sessionStorage);
 
 let pending: Promise<TmaEnv | null> | undefined;
 
@@ -75,8 +86,12 @@ async function start(): Promise<TmaEnv | null> {
 
   configureApi({ initDataRaw: retrieveRawInitData(), ...(mockFetch ? { fetch: mockFetch } : {}) });
   const user = initData.user();
+  const launch = retrieveLaunchParams();
+  const startIssue = takeStartIssue(launch.tgWebAppStartParam, startFlag);
   return {
-    platform: uiPlatform(retrieveLaunchParams().tgWebAppPlatform),
+    redirect:
+      startIssue === null ? null : issueUrl(startIssue, themeParams.isDark() ? 'dark' : 'light'),
+    platform: uiPlatform(launch.tgWebAppPlatform),
     user: user
       ? {
           firstName: user.first_name,

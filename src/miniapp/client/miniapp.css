@@ -156,6 +156,28 @@ html * {
   height: 30px;
 }
 
+/* Section header with a trailing text action («Изменить» / «Готово»), like iOS list headers. */
+.pd-section-head h1 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pd-text-button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--tgui--link_color);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* ---------- hub ---------- */
 
 .pd-large-title {

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
 import { listUserChannels, removeUserChannel, type UserChannelView } from '@/channels';
 import type { Database } from '@/db';
@@ -36,6 +36,8 @@ export interface ClaimInput {
   globalLimit: number;
 }
 
+export type SoftDeleteResult = 'deleted' | 'not_found' | 'busy';
+
 export type ClaimResult =
   /** used = quota builds today including this one (0 when perUserLimit is null). */
   | { kind: 'started'; issue: IssueStateRow; used: number }
@@ -47,6 +49,8 @@ export type ClaimResult =
 export interface AppStore {
   /** Creates or refreshes the user from initData (does not touch bot_blocked_at). */
   upsertUser(user: MiniAppUser): Promise<AppUser>;
+  /** Read-only lookup: a reader of a shared issue must not become a user. */
+  findUser(telegramId: number): Promise<AppUser | undefined>;
   /** Sets onboarded_at once; returns the stored value. */
   markOnboarded(userId: number, at: Date): Promise<Date>;
   setInterests(userId: number, interests: string | null): Promise<void>;
@@ -60,8 +64,15 @@ export interface AppStore {
   ): Promise<ReadyIssueRow[]>;
   /** The newest in-flight issue, stale or not. */
   latestInFlight(userId: number): Promise<IssueStateRow | undefined>;
-  /** Only the user's own issue; `id` must already be a valid uuid. */
+  /** Only the user's own, non-deleted issue; `id` must already be a valid uuid. */
   getIssue(userId: number, id: string): Promise<IssueStateRow | undefined>;
+  /** The user's own ready, non-deleted issue with its content (share, PDF). */
+  getReadyIssue(userId: number, id: string): Promise<ReadyIssueRow | undefined>;
+  /**
+   * Hides the user's own ready issue for good; idempotent (a repeat call is 'deleted').
+   * busy = still being built; not_found = no such issue of this user, or a failed one.
+   */
+  softDeleteIssue(userId: number, id: string): Promise<SoftDeleteResult>;
   /** Builds since `since` that count toward the quota (exempt failures excluded). */
   countBuilds(userId: number, since: Date): Promise<number>;
   claimIssue(input: ClaimInput): Promise<ClaimResult>;
@@ -110,6 +121,15 @@ export function createAppDbStore(db: Database): AppStore {
       return row;
     },
 
+    async findUser(telegramId) {
+      const [row] = await db
+        .select(userColumns)
+        .from(users)
+        .where(eq(users.telegramId, telegramId))
+        .limit(1);
+      return row;
+    },
+
     async markOnboarded(userId, at) {
       const [row] = await db
         .update(users)
@@ -149,6 +169,7 @@ export function createAppDbStore(db: Database): AppStore {
             eq(issues.userId, userId),
             eq(issues.status, 'ready'),
             isNotNull(issues.number),
+            isNull(issues.deletedAt),
             ...(page.before === undefined ? [] : [lt(issues.number, page.before)]),
           ),
         )
@@ -171,11 +192,52 @@ export function createAppDbStore(db: Database): AppStore {
       const [row] = await db
         .select(stateColumns)
         .from(issues)
-        .where(and(eq(issues.id, id), eq(issues.userId, userId)))
+        .where(and(eq(issues.id, id), eq(issues.userId, userId), isNull(issues.deletedAt)))
         .limit(1);
       return row;
     },
 
+    async softDeleteIssue(userId, id) {
+      // Only ready rows: the pipeline never writes to a ready issue again, so this cannot race
+      // with a running build. coalesce keeps the first deletion time on a repeat call.
+      const [row] = await db
+        .update(issues)
+        .set({ deletedAt: sql`coalesce(${issues.deletedAt}, now())` })
+        .where(and(eq(issues.id, id), eq(issues.userId, userId), eq(issues.status, 'ready')))
+        .returning({ id: issues.id });
+      if (row !== undefined) return 'deleted';
+      const [other] = await db
+        .select({ id: issues.id })
+        .from(issues)
+        .where(
+          and(eq(issues.id, id), eq(issues.userId, userId), inArray(issues.status, [...IN_FLIGHT])),
+        )
+        .limit(1);
+      return other === undefined ? 'not_found' : 'busy';
+    },
+
+    async getReadyIssue(userId, id) {
+      const [row] = await db
+        .select({
+          id: issues.id,
+          number: issues.number,
+          createdAt: issues.createdAt,
+          contentJson: issues.contentJson,
+        })
+        .from(issues)
+        .where(
+          and(
+            eq(issues.id, id),
+            eq(issues.userId, userId),
+            eq(issues.status, 'ready'),
+            isNull(issues.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row === undefined || row.number === null ? undefined : { ...row, number: row.number };
+    },
+
+    // Deleted issues still count: deleting must not refund the daily quota.
     async countBuilds(userId, since) {
       const [row] = await db
         .select({ value: count() })
@@ -184,6 +246,8 @@ export function createAppDbStore(db: Database): AppStore {
       return row?.value ?? 0;
     },
 
+    // No deleted_at filter anywhere in the claim: a deleted issue still holds its quota slot
+    // and its share of the global cap, and only ready issues can be deleted (never in-flight).
     async claimIssue(input) {
       return db.transaction(async (tx) => {
         // Serialises claims of one user: two taps cannot both pass the checks below.

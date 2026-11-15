@@ -4,7 +4,7 @@ import { texts as botTexts } from '@/bot/texts';
 import { apiErrorCodes, issueErrorCodes } from '@/miniapp/contract';
 
 import { appendInterest } from './interests';
-import { apiErrorText, errorText, issueErrorText } from './texts';
+import { apiErrorText, errorText, issueErrorText, t } from './texts';
 
 describe('error copy', () => {
   it.each([...apiErrorCodes, 'network' as const])('api %s has Russian copy', (code) => {
@@ -36,5 +36,30 @@ describe('appendInterest', () => {
     expect(appendInterest('Новости Омска', 'Без спорта')).toBe('Новости Омска, без спорта');
     expect(appendInterest('Новости Омска.', 'Без спорта')).toBe('Новости Омска. без спорта');
     expect(appendInterest('Новости, без спорта', 'Без спорта')).toBe('Новости, без спорта');
+  });
+});
+
+describe('dash rule', () => {
+  const strings = (value: unknown): string[] => {
+    if (typeof value === 'string') return [value];
+    if (typeof value === 'function') return strings((value as (n: number) => unknown)(2));
+    if (Array.isArray(value)) return value.flatMap(strings);
+    if (value && typeof value === 'object') return Object.values(value).flatMap(strings);
+    return [];
+  };
+
+  it('UI copy uses the en dash only', () => {
+    const all = strings([t, apiErrorText, issueErrorText]);
+    expect(all.length).toBeGreaterThan(50);
+    for (const text of all) expect(text).not.toContain('—');
+  });
+
+  it('archive delete and issue actions copy', () => {
+    expect(t.archive.deleteTitle(4)).toBe('Удалить выпуск №\u00A04?');
+    expect(t.archive.deleteText).toBe(
+      'Выпуск пропадёт из архива, ссылка на него перестанет открываться.',
+    );
+    expect(t.issueActions.share).toBe('Поделиться');
+    expect(t.issueActions.pdf).toBe('Скачать PDF');
   });
 });

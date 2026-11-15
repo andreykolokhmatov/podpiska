@@ -6,8 +6,13 @@ import {
   miniApp,
   openTelegramLink,
   postEvent,
+  retrieveRawInitData,
   secondaryButton,
 } from '@tma.js/sdk-react';
+
+import { configureApi, type FetchLike } from './api';
+import { loadDevMock, wantsDevMock } from './devMock';
+import { issueIdFromPath, startIssueActions } from './issueActions';
 
 /** Opened by a full page load, so history.back() returns to the Mini App screen we came from. */
 function goBack(): void {
@@ -19,9 +24,20 @@ function goBack(): void {
 
 const POST_LINK = '.np a[href^="https://t.me/"]';
 
+/** The promo plate carries the bot username (server env), so the share fallback can deep-link. */
+function promoBot(): string | null {
+  const plate = document.querySelector<HTMLElement>('.np [data-promo-bot]');
+  return plate?.dataset.promoBot ?? null;
+}
+
+async function apiTransport(): Promise<FetchLike | undefined> {
+  if (!loadDevMock || !wantsDevMock(window.location.search)) return undefined;
+  return (await loadDevMock()).installDevMock(window.location.search);
+}
+
 /**
  * Telegram keeps the hub's MainButton across the full page load, so the newspaper would show an
- * empty bar. Hide it through the SDK (updates the state it persists for the hub's next mount) and
+ * empty bar. Start from hidden; the owner's own issue then gets its share/PDF buttons. Hide it through the SDK (updates the state it persists for the hub's next mount) and
  * with a raw event (the SDK skips posting when its restored state already says hidden).
  */
 function hideBottomButtons(): void {
@@ -43,8 +59,9 @@ function hideBottomButtons(): void {
 }
 
 /**
- * Newspaper / privacy inside Telegram: native BackButton and t.me links through
- * openTelegramLink (a plain target=_blank link would leave the Mini App). Returns a cleanup.
+ * Newspaper / privacy inside Telegram: native BackButton, t.me links through openTelegramLink
+ * (a plain target=_blank link would leave the Mini App) and, on an issue, the owner's share/PDF
+ * buttons. Returns a cleanup.
  */
 export function startBridge(): (() => void) | undefined {
   if (!isTMA()) return undefined;
@@ -65,7 +82,28 @@ export function startBridge(): (() => void) | undefined {
   };
   document.addEventListener('click', onClick);
 
+  let alive = true;
+  let stopActions: (() => void) | undefined;
+  const issueId = issueIdFromPath(window.location.pathname);
+  if (issueId !== null) {
+    void apiTransport()
+      .catch(() => undefined)
+      .then((transport) => {
+        if (!alive) return;
+        configureApi({
+          initDataRaw: retrieveRawInitData(),
+          ...(transport ? { fetch: transport } : {}),
+        });
+        stopActions = startIssueActions(issueId, {
+          botUsername: promoBot(),
+          origin: window.location.origin,
+        });
+      });
+  }
+
   return () => {
+    alive = false;
+    stopActions?.();
     document.removeEventListener('click', onClick);
     if (off.ok) off.data();
     backButton.hide.ifAvailable();

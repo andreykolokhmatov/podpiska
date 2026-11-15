@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { TmaContext, useAppearance } from './hooks';
 import { OutsideTelegram } from './screens/OutsideTelegram';
-import { initTmaOnce, type TmaEnv } from './sdk';
+import { initTmaOnce, navigateFull, type TmaEnv } from './sdk';
 
 interface TmaRootProps {
   children: ReactNode;
@@ -20,11 +20,26 @@ export function TmaRoot({ children }: TmaRootProps) {
 
   useEffect(() => {
     let alive = true;
+    let offPageShow: (() => void) | undefined;
     void initTmaOnce().then((value) => {
-      if (alive) setEnv(value);
+      if (!alive) return;
+      if (value?.redirect) {
+        // Opened by a shared issue link: go straight to the newspaper, render no screen (no API
+        // call, so a reader is not registered). Back may restore this page from bfcache – then
+        // show the app as a normal launch.
+        const onPageShow = (event: PageTransitionEvent) => {
+          if (event.persisted) setEnv({ ...value, redirect: null });
+        };
+        window.addEventListener('pageshow', onPageShow);
+        offPageShow = () => window.removeEventListener('pageshow', onPageShow);
+        navigateFull(value.redirect);
+        return;
+      }
+      setEnv(value);
     });
     return () => {
       alive = false;
+      offPageShow?.();
     };
   }, []);
 

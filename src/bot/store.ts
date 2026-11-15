@@ -43,7 +43,14 @@ export function createBotDbStore(db: Database): BotStore {
       const rows = await db
         .update(issues)
         .set({ notifiedAt: new Date() })
-        .where(and(eq(issues.id, issueId), eq(issues.status, 'ready'), isNull(issues.notifiedAt)))
+        .where(
+          and(
+            eq(issues.id, issueId),
+            eq(issues.status, 'ready'),
+            isNull(issues.notifiedAt),
+            isNull(issues.deletedAt),
+          ),
+        )
         .returning({ id: issues.id });
       return rows.length > 0;
     },

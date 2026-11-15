@@ -209,6 +209,23 @@ describe('thin issues', () => {
   });
 });
 
+describe('promo plate', () => {
+  it('renders the plate linked to the bot when promo is set', () => {
+    const promo = { botUsername: 'podpiska_news_bot', url: 'https://t.me/podpiska_news_bot' };
+    const $ = load(renderToStaticMarkup(<Newspaper issue={sample} promo={promo} />));
+    const plate = $('footer a.promo');
+    expect(plate).toHaveLength(1);
+    expect(plate.attr('href')).toBe('https://t.me/podpiska_news_bot');
+    expect(plate.attr('data-promo-bot')).toBe('podpiska_news_bot');
+    expect(plate.text()).toBe('Соберите свою газету → @podpiska_news_bot');
+  });
+
+  it.each([undefined, null])('has no plate when promo is %s', (promo) => {
+    const $ = load(renderToStaticMarkup(<Newspaper issue={sample} promo={promo} />));
+    expect($('.promo')).toHaveLength(0);
+  });
+});
+
 describe('safety and theme', () => {
   it('escapes hostile text', () => {
     const hostile: IssueDoc = {

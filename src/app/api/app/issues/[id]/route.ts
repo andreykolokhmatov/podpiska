@@ -1,9 +1,7 @@
-import { handleGetIssue } from '@/miniapp';
+import { appIdHandler } from '@/miniapp';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  return handleGetIssue(req, id);
-}
+export const GET = appIdHandler('getIssue');
+export const DELETE = appIdHandler('deleteIssue');

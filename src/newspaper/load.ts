@@ -9,6 +9,8 @@ export interface IssueRow {
   id: string;
   status: IssueStatus;
   contentJson: unknown;
+  /** Soft-deleted by its owner: served exactly like a missing issue. */
+  deletedAt?: Date | null;
 }
 
 export type IssueView =
@@ -24,7 +26,7 @@ const uuidSchema = z.uuid();
 
 /** Pure status → view mapping. Invalid content logs the id and zod paths only, never the content. */
 export function resolveIssueView(row: IssueRow | undefined): IssueView {
-  if (row === undefined) return { kind: 'not-found' };
+  if (row === undefined || (row.deletedAt ?? null) !== null) return { kind: 'not-found' };
   if (row.status === 'failed') return { kind: 'failed' };
   if (row.status !== 'ready') return { kind: 'building', status: row.status };
 
@@ -54,6 +56,7 @@ const fetchIssueRow: FetchIssueRow = async (id) => {
       id: schema.issues.id,
       status: schema.issues.status,
       contentJson: schema.issues.contentJson,
+      deletedAt: schema.issues.deletedAt,
     })
     .from(schema.issues)
     .where(eq(schema.issues.id, id))

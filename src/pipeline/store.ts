@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, gt, gte, inArray, lt, lte, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 
 import type { Database } from '@/db';
 import { channelDigests, channels, issues, posts, userChannels, users } from '@/db/schema';
@@ -70,12 +83,12 @@ export interface IssueStore {
   progress(id: string, patch: IssueProgress): Promise<void>;
   /** Marks any non-final issue failed; a ready/failed issue is left untouched. */
   fail(id: string, message: string, stats: unknown): Promise<void>;
-  /** composing→ready; assigns number = user's max + 1 inside the transaction. */
+  /** composing→ready; number = user's max (deleted included) + 1, inside the transaction. */
   complete(
     id: string,
     build: (number: number) => { content: unknown; stats: unknown },
   ): Promise<number>;
-  /** period_end of the user's latest ready issue, if any. */
+  /** period_end of the user's latest ready, non-deleted issue. */
   lastReadyPeriodEnd(userId: number): Promise<Date | undefined>;
   getUserChannels(userId: number): Promise<UserChannelRow[]>;
   getPostsMeta(ids: readonly number[]): Promise<PostMeta[]>;
@@ -210,6 +223,8 @@ export function createIssueDbStore(db: Database): IssueStore {
               .from(users)
               .where(eq(users.id, issue.userId))
               .for('update');
+            // Deleted issues are included on purpose: their numbers stay taken, otherwise the
+            // unique (user_id, number) constraint would collide with the soft-deleted row.
             const [max] = await tx
               .select({ value: sql<number>`coalesce(max(${issues.number}), 0)::int` })
               .from(issues)
@@ -233,7 +248,8 @@ export function createIssueDbStore(db: Database): IssueStore {
       const [row] = await db
         .select({ periodEnd: issues.periodEnd })
         .from(issues)
-        .where(and(eq(issues.userId, userId), eq(issues.status, 'ready')))
+        // A deleted issue does not cover its period: the next build re-covers it (owner decision).
+        .where(and(eq(issues.userId, userId), eq(issues.status, 'ready'), isNull(issues.deletedAt)))
         .orderBy(desc(issues.periodEnd))
         .limit(1);
       return row?.periodEnd;

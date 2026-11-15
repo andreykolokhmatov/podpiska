@@ -134,6 +134,9 @@ export const issues = pgTable(
     digestsDone: integer('digests_done').notNull().default(0),
     // Claim for the "issue ready" message: set before sending, cleared on a transient failure.
     notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    // Soft delete by the owner: hidden from every read path, but still counted for numbering
+    // and the daily quota.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [

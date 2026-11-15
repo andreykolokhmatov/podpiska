@@ -7,16 +7,19 @@ import { seedStores } from '@/pipeline/__fixtures__/compose-fixtures';
 import { mockStage } from '@/pipeline/__fixtures__/fakes';
 import type { PipelineDeps } from '@/pipeline/run';
 
-import { cleanInterests, createAppApi, type AppApiDeps } from './api';
+import { cleanInterests, createAppApi, type AppApiDeps, type ShareRequest } from './api';
 import {
   addChannelResponseSchema,
   apiErrorSchema,
   buildResponseSchema,
   channelsResponseSchema,
+  deleteIssueResponseSchema,
   interestsResponseSchema,
   issueResponseSchema,
   issuesResponseSchema,
   meResponseSchema,
+  pdfLinkResponseSchema,
+  shareIssueResponseSchema,
 } from './contract';
 import { countsTowardQuota, isInFlight, type IssueStateRow } from './status';
 import type { AppStore, AppUser, ClaimInput, ClaimResult, ReadyIssueRow } from './store';
@@ -46,6 +49,7 @@ const initData = (
 interface IssueRow extends IssueStateRow {
   userId: number;
   contentJson: unknown;
+  deletedAt: Date | null;
 }
 
 class FakeAppStore implements AppStore {
@@ -70,6 +74,9 @@ class FakeAppStore implements AppStore {
     this.users.set(created.id, created);
     return created;
   }
+  async findUser(telegramId: number) {
+    return [...this.users.values()].find((u) => u.telegramId === telegramId);
+  }
   async markOnboarded(userId: number, at: Date) {
     const user = this.users.get(userId)!;
     user.onboardedAt ??= at;
@@ -93,6 +100,7 @@ class FakeAppStore implements AppStore {
   async listReadyIssues(userId: number, page: { limit: number; before?: number }) {
     return this.issues
       .filter((i) => i.userId === userId && i.status === 'ready' && i.number !== null)
+      .filter((i) => i.deletedAt === null)
       .filter((i) => page.before === undefined || (i.number ?? 0) < page.before)
       .sort((a, b) => (b.number ?? 0) - (a.number ?? 0))
       .slice(0, page.limit)
@@ -108,7 +116,28 @@ class FakeAppStore implements AppStore {
   }
   async getIssue(userId: number, id: string) {
     this.getIssueCalls += 1;
-    return this.issues.find((i) => i.id === id && i.userId === userId);
+    return this.issues.find((i) => i.id === id && i.userId === userId && i.deletedAt === null);
+  }
+  async getReadyIssue(userId: number, id: string) {
+    this.getIssueCalls += 1;
+    const row = this.issues.find(
+      (i) => i.id === id && i.userId === userId && i.status === 'ready' && i.deletedAt === null,
+    );
+    if (row === undefined || row.number === null) return undefined;
+    return {
+      id: row.id,
+      number: row.number,
+      createdAt: row.createdAt,
+      contentJson: row.contentJson,
+    };
+  }
+  async softDeleteIssue(userId: number, id: string) {
+    const row = this.issues.find((i) => i.id === id && i.userId === userId);
+    if (row?.status === 'ready') {
+      row.deletedAt ??= now;
+      return 'deleted' as const;
+    }
+    return row !== undefined && isInFlight(row.status) ? ('busy' as const) : ('not_found' as const);
   }
   async countBuilds(userId: number, since: Date) {
     return this.issues.filter(
@@ -140,6 +169,7 @@ class FakeAppStore implements AppStore {
       digestsTotal: 0,
       createdAt: now,
       contentJson: null,
+      deletedAt: null,
       ...patch,
     };
     this.issues.push(row);
@@ -159,6 +189,7 @@ const setup = (
     env?: Partial<MiniAppEnv>;
     pipeline?: () => PipelineDeps;
     addChannel?: AppApiDeps['addChannel'];
+    share?: AppApiDeps['share'];
   } = {},
 ) => {
   const store = new FakeAppStore();
@@ -183,6 +214,11 @@ const setup = (
       })),
   );
   const pipeline = vi.fn(opts.pipeline ?? (() => pipelineDeps));
+  const share = vi.fn<AppApiDeps['share']>(opts.share ?? (async () => 'prepared-1'));
+  const pdfLink = vi.fn<AppApiDeps['pdfLink']>(({ issueId, number }) => ({
+    url: `https://podpiska.example/api/issues/${issueId}/pdf?exp=1&sig=x`,
+    fileName: `Podpiska-${number}.pdf`,
+  }));
   const env: MiniAppEnv = {
     TELEGRAM_BOT_TOKEN: PROD,
     TELEGRAM_DEV_BOT_TOKEN: DEV,
@@ -198,9 +234,11 @@ const setup = (
     addChannel,
     pipeline,
     schedule: (task) => tasks.push(task),
+    share,
+    pdfLink,
     log: (line) => lines.push(line),
   });
-  return { api, store, tasks, lines, addChannel, pipeline };
+  return { api, store, tasks, lines, addChannel, pipeline, share, pdfLink };
 };
 
 const req = (
@@ -233,6 +271,9 @@ describe('auth on every route', () => {
     api.listIssues(req('GET', '/api/app/issues', { auth })),
     api.buildIssue(req('POST', '/api/app/issues', { auth })),
     api.getIssue(req('GET', `/api/app/issues/${UUID(1)}`, { auth }), UUID(1)),
+    api.deleteIssue(req('DELETE', `/api/app/issues/${UUID(1)}`, { auth }), UUID(1)),
+    api.shareIssue(req('POST', `/api/app/issues/${UUID(1)}/share`, { auth }), UUID(1)),
+    api.pdfLink(req('POST', `/api/app/issues/${UUID(1)}/pdf-link`, { auth }), UUID(1)),
   ];
 
   it.each([
@@ -269,6 +310,8 @@ describe('auth on every route', () => {
       addChannel: vi.fn(),
       pipeline: vi.fn(),
       schedule: vi.fn(),
+      share: vi.fn(),
+      pdfLink: vi.fn(),
       log: vi.fn(),
     });
     const res = await api.me(req('GET', '/api/app/me'));
@@ -636,6 +679,14 @@ describe('issues', () => {
     expect(own.issue).toMatchObject({ status: 'failed', error: 'no_news', number: null });
   });
 
+  it('does not register a reader who opens a shared issue', async () => {
+    const { api, store } = setup();
+    const shared = store.add(7, { status: 'ready', number: 1 });
+    const res = await api.getIssue(req('GET', '/'), shared.id);
+    expect(res.status).toBe(404);
+    expect(store.users.size).toBe(0);
+  });
+
   it('pages the archive newest first', async () => {
     const { api, store } = setup();
     await api.me(req('GET', '/api/app/me'));
@@ -654,5 +705,181 @@ describe('issues', () => {
     expect(second.nextBefore).toBeNull();
     const bad = await api.listIssues(req('GET', '/api/app/issues?limit=500'));
     expect(bad.status).toBe(400);
+  });
+});
+
+const content = (headline: string) => ({
+  masthead: { dateline: '15 ноября 2026' },
+  lead: { headline },
+});
+
+describe('delete issue', () => {
+  const del = (api: ReturnType<typeof setup>['api'], id: string) =>
+    api.deleteIssue(req('DELETE', `/api/app/issues/${id}`), id);
+
+  it('soft-deletes the own ready issue; a repeat call is still 200', async () => {
+    const { api, store, lines } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    const issue = store.add(1, { status: 'ready', number: 1 });
+
+    const first = await del(api, issue.id);
+    expect(first.status).toBe(200);
+    expect(deleteIssueResponseSchema.parse(await first.json())).toEqual({ ok: true });
+    expect(issue.deletedAt).toEqual(now);
+    expect((await del(api, issue.id)).status).toBe(200);
+    expect(lines).toContain(`[app] issue ${issue.id}: deleted`);
+  });
+
+  it('answers 404 for a foreign, failed or malformed id and touches nothing', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    const foreign = store.add(7, { status: 'ready', number: 1 });
+    const failed = store.add(1, { status: 'failed', error: 'no_news: x' });
+
+    for (const id of [foreign.id, failed.id, "1' or 1=1", UUID(99)]) {
+      const res = await del(api, id);
+      expect(res.status).toBe(404);
+      expect(await errorOf(res)).toBe('not_found');
+    }
+    expect(store.issues.every((issue) => issue.deletedAt === null)).toBe(true);
+  });
+
+  it('answers 409 busy for an issue still being built', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    const building = store.add(1, { status: 'digesting' });
+    const res = await del(api, building.id);
+    expect(res.status).toBe(409);
+    expect(apiErrorSchema.parse(await res.json())).toEqual({ error: 'busy', issueId: building.id });
+    expect(building.deletedAt).toBeNull();
+  });
+
+  it('hides the deleted issue from the archive, me.latestIssue and GET', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    store.add(1, { status: 'ready', number: 1 });
+    const second = store.add(1, { status: 'ready', number: 2 });
+    await del(api, second.id);
+
+    const me = meResponseSchema.parse(await (await api.me(req('GET', '/api/app/me'))).json());
+    expect(me.latestIssue?.number).toBe(1);
+    const list = issuesResponseSchema.parse(
+      await (await api.listIssues(req('GET', '/api/app/issues'))).json(),
+    );
+    expect(list.issues.map((issue) => issue.number)).toEqual([1]);
+    expect((await api.getIssue(req('GET', '/'), second.id)).status).toBe(404);
+  });
+
+  it('does not refund the daily quota', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    const issue = store.add(1, { status: 'ready', number: 1 });
+    const before = meResponseSchema.parse(await (await api.me(req('GET', '/api/app/me'))).json());
+    await del(api, issue.id);
+    const after = meResponseSchema.parse(await (await api.me(req('GET', '/api/app/me'))).json());
+    expect(before.quota?.used).toBe(1);
+    expect(after.quota).toEqual(before.quota);
+  });
+});
+
+describe('share issue', () => {
+  const share = (api: ReturnType<typeof setup>['api'], id: string, auth?: string) =>
+    api.shareIssue(
+      req('POST', `/api/app/issues/${id}/share`, auth === undefined ? {} : { auth }),
+      id,
+    );
+
+  it('prepares the card through the prod bot with the issue headline', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 4, contentJson: content('Омск строит мост') });
+    const res = await share(ctx.api, issue.id);
+    expect(res.status).toBe(200);
+    expect(shareIssueResponseSchema.parse(await res.json())).toEqual({
+      preparedMessageId: 'prepared-1',
+    });
+    expect(ctx.share).toHaveBeenCalledWith({
+      bot: 'prod',
+      telegramUserId: 42,
+      issueId: issue.id,
+      number: 4,
+      headline: 'Омск строит мост',
+    } satisfies ShareRequest);
+  });
+
+  it('uses the dev bot for dev-signed initData', async () => {
+    const ctx = setup();
+    const auth = `tma ${initData({ token: DEV })}`;
+    await ctx.api.me(req('GET', '/api/app/me', { auth }));
+    const issue = ctx.store.add(1, { number: 1 });
+    expect((await share(ctx.api, issue.id, auth)).status).toBe(200);
+    expect(ctx.share.mock.calls[0]?.[0]).toMatchObject({ bot: 'dev', headline: null });
+  });
+
+  it('never prepares a card for a foreign, deleted or unfinished issue', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const ids = [
+      ctx.store.add(7, { number: 1 }).id,
+      ctx.store.add(1, { number: 2, deletedAt: now }).id,
+      ctx.store.add(1, { status: 'composing' }).id,
+      'not-a-uuid',
+    ];
+    for (const id of ids) {
+      const res = await share(ctx.api, id);
+      expect(res.status).toBe(404);
+      expect(await errorOf(res)).toBe('not_found');
+    }
+    expect(ctx.share).not.toHaveBeenCalled();
+  });
+
+  it('answers 500 on a Bot API failure without logging the token', async () => {
+    const ctx = setup({
+      share: async () => {
+        throw new Error(`request to https://api.telegram.org/bot${PROD}/x failed`);
+      },
+    });
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 1 });
+    const res = await share(ctx.api, issue.id);
+    expect(res.status).toBe(500);
+    expect(await errorOf(res)).toBe('internal');
+    expect(ctx.lines.join('\n')).not.toContain(PROD);
+    expect(ctx.lines.join('\n')).not.toContain('prod-token');
+  });
+});
+
+describe('pdf link', () => {
+  it('returns the signed link for the own ready issue', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 3 });
+    const res = await ctx.api.pdfLink(req('POST', '/'), issue.id);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = pdfLinkResponseSchema.parse(await res.json());
+    expect(body.fileName).toBe('Podpiska-3.pdf');
+    expect(ctx.pdfLink).toHaveBeenCalledWith({ issueId: issue.id, number: 3 });
+  });
+
+  it('answers 404 for a foreign or deleted issue', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    for (const issue of [ctx.store.add(7, { number: 1 }), ctx.store.add(1, { deletedAt: now })]) {
+      expect((await ctx.api.pdfLink(req('POST', '/'), issue.id)).status).toBe(404);
+    }
+    expect(ctx.pdfLink).not.toHaveBeenCalled();
+  });
+
+  it('answers 500 misconfigured when the PDF env is invalid', async () => {
+    const ctx = setup();
+    ctx.pdfLink.mockImplementation(() => {
+      throw new EnvError('Invalid environment variables:\n  - APP_URL: is required');
+    });
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 1 });
+    const res = await ctx.api.pdfLink(req('POST', '/'), issue.id);
+    expect(res.status).toBe(500);
+    expect(await errorOf(res)).toBe('misconfigured');
   });
 });

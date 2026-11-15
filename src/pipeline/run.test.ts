@@ -97,6 +97,16 @@ describe('runIssuePipeline', () => {
     ]);
   });
 
+  it('numbers past a soft-deleted issue: deleted numbers stay taken', async () => {
+    const { deps, issues } = setup(() => JSON.stringify(validDraft()));
+    const first = await runIssuePipeline(deps, input);
+    const record = issues.issues.get(first.issueId);
+    if (record === undefined) throw new Error('no record');
+    record.deletedAt = now;
+    const second = await runIssuePipeline(deps, input);
+    expect([first.number, second.number]).toEqual([1, 2]);
+  });
+
   it('marks the issue failed with only the error message', async () => {
     const { deps, issues } = setup(() => new Error('Payment Required'));
     const error = await runIssuePipeline(deps, input).catch((caught: unknown) => caught);
@@ -289,5 +299,29 @@ describe('executeIssueRun', () => {
     });
     expect(issues.issues.get(result.issueId)?.status).toBe('ready');
     expect(notify).not.toHaveBeenCalled();
+  });
+});
+
+describe('planIssuePeriod', () => {
+  it('re-covers the period of a soft-deleted issue (owner decision)', async () => {
+    const { deps, issues } = setup(() => '{}');
+    const hour = 3_600_000;
+    const add = async (endOffsetH: number) => {
+      const end = new Date(now.getTime() - endOffsetH * hour);
+      const record = await issues.create(1, { start: new Date(end.getTime() - 24 * hour), end });
+      const row = issues.issues.get(record.id);
+      if (row === undefined) throw new Error('no record');
+      row.status = 'ready';
+      return row;
+    };
+    const older = await add(6);
+    const newer = await add(2);
+
+    expect((await planIssuePeriod(deps, { userId: 1, days: 1 })).start).toEqual(newer.periodEnd);
+    newer.deletedAt = now;
+    expect((await planIssuePeriod(deps, { userId: 1, days: 1 })).start).toEqual(older.periodEnd);
+    older.deletedAt = now;
+    const fresh = await planIssuePeriod(deps, { userId: 1, days: 1 });
+    expect(fresh.start).toEqual(new Date(now.getTime() - 24 * hour));
   });
 });

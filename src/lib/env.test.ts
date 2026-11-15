@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnvError, getBotEnv, getDatabaseUrl, getLlmEnv, getMiniAppEnv, parseEnv } from './env';
+import {
+  EnvError,
+  getBotEnv,
+  getDatabaseUrl,
+  getLlmEnv,
+  getMiniAppEnv,
+  getPdfEnv,
+  getPromoEnv,
+  parseEnv,
+} from './env';
 
 const validSource = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/podpiska',
@@ -217,5 +226,49 @@ describe('getMiniAppEnv', () => {
       expect(error.message).toContain(key);
     }
     expect(error.message).not.toContain('dev-SECRET');
+  });
+});
+
+describe('getPromoEnv', () => {
+  it('treats an unset or empty username as no plate', () => {
+    expect(getPromoEnv({}).TELEGRAM_BOT_USERNAME).toBeUndefined();
+    expect(getPromoEnv({ TELEGRAM_BOT_USERNAME: '' }).TELEGRAM_BOT_USERNAME).toBeUndefined();
+  });
+
+  it('accepts a bot username', () => {
+    const env = getPromoEnv({ TELEGRAM_BOT_USERNAME: 'podpiska_news_bot' });
+    expect(env.TELEGRAM_BOT_USERNAME).toBe('podpiska_news_bot');
+  });
+
+  it.each(['@podpiska_news_bot', 'abc', 'x'.repeat(33), 'bad-name', 'https://t.me/bot'])(
+    'rejects %j without echoing it',
+    (value) => {
+      const error = errorOf(() => getPromoEnv({ TELEGRAM_BOT_USERNAME: value }));
+      expect(error.message).toContain('TELEGRAM_BOT_USERNAME');
+      expect(error.message).not.toContain(value);
+    },
+  );
+});
+
+describe('getPdfEnv', () => {
+  const source = {
+    TELEGRAM_BOT_TOKEN: validSource.TELEGRAM_BOT_TOKEN,
+    APP_URL: validSource.APP_URL,
+  };
+
+  it('needs the bot token and APP_URL; the Chrome path is optional', () => {
+    const env = getPdfEnv({ ...source, APP_URL: 'https://podpiska.example.com/' });
+    expect(env.APP_URL).toBe('https://podpiska.example.com');
+    expect(env.CHROME_EXECUTABLE_PATH).toBeUndefined();
+    expect(getPdfEnv({ ...source, CHROME_EXECUTABLE_PATH: '/usr/bin/chromium' })).toMatchObject({
+      CHROME_EXECUTABLE_PATH: '/usr/bin/chromium',
+    });
+  });
+
+  it('rejects a missing token and an http APP_URL without echoing values', () => {
+    const error = errorOf(() => getPdfEnv({ APP_URL: 'http://secret-host.example' }));
+    expect(error.message).toContain('TELEGRAM_BOT_TOKEN');
+    expect(error.message).toContain('APP_URL');
+    expect(error.message).not.toContain('secret-host');
   });
 });

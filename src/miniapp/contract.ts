@@ -217,3 +217,22 @@ export type BuildResponse = z.infer<typeof buildResponseSchema>;
 // GET /api/app/issues/<id> — 404 not_found for a foreign or malformed id.
 export const issueResponseSchema = z.object({ issue: issueStateSchema });
 export type IssueResponse = z.infer<typeof issueResponseSchema>;
+
+// DELETE /api/app/issues/<id> — soft delete of the user's own ready issue; idempotent.
+// 404 not_found (foreign, malformed, failed, already gone for another user), 409 busy (in flight).
+export const deleteIssueResponseSchema = z.object({ ok: z.literal(true) });
+export type DeleteIssueResponse = z.infer<typeof deleteIssueResponseSchema>;
+
+// POST /api/app/issues/<id>/share — no body. Pass the id to shareMessage(); never cache it.
+// 404 not_found unless the issue is the user's own, ready and not deleted.
+export const shareIssueResponseSchema = z.object({ preparedMessageId: z.string().min(1) });
+export type ShareIssueResponse = z.infer<typeof shareIssueResponseSchema>;
+
+// POST /api/app/issues/<id>/pdf-link — no body. Hand both to downloadFile({ url, file_name }).
+// The url is public but signed and valid until 00:00 MSK. 404 as for share.
+export const pdfLinkResponseSchema = z.object({
+  url: z.url({ protocol: /^https$/ }),
+  /** «Podpiska-N.pdf». */
+  fileName: z.string().min(1),
+});
+export type PdfLinkResponse = z.infer<typeof pdfLinkResponseSchema>;

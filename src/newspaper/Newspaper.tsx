@@ -13,6 +13,7 @@ import {
   SideSection,
 } from './blocks';
 import { isSectionEmpty, normalizeIssueDashes } from './format';
+import type { NewspaperPromo } from './promo';
 
 export type NewspaperTheme = 'light' | 'dark';
 
@@ -20,10 +21,12 @@ interface NewspaperProps {
   issue: IssueDoc;
   /** Forced theme; without it the tokens follow prefers-color-scheme (or the Telegram theme script). */
   theme?: NewspaperTheme | undefined;
+  /** «Соберите свою газету» plate under the colophon; null/undefined = no plate (self-host). */
+  promo?: NewspaperPromo | null | undefined;
 }
 
 /** The whole issue as static markup: slots are placed by class, mobile order comes from CSS. */
-export function Newspaper({ issue: raw, theme }: NewspaperProps) {
+export function Newspaper({ issue: raw, theme, promo }: NewspaperProps) {
   const issue = normalizeIssueDashes(raw);
   const briefs = issue.briefs ?? [];
   const curiosities = issue.curiosities ?? [];
@@ -66,7 +69,7 @@ export function Newspaper({ issue: raw, theme }: NewspaperProps) {
           ) : null}
           {events.length > 0 ? <Events events={events} /> : null}
         </main>
-        <Colophon text={issue.colophon} number={issue.masthead.number} />
+        <Colophon text={issue.colophon} number={issue.masthead.number} promo={promo} />
       </div>
     </div>
   );

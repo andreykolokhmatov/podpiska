@@ -5,13 +5,23 @@ import { createIssueNotifier } from '@/bot/notify';
 import { createBotDbStore } from '@/bot/store';
 import { addUserChannel, createChannelsDbStore, createInteractiveSource } from '@/channels';
 import { getDb } from '@/db';
-import { EnvError, getBotEnv, getLlmEnv, getMiniAppEnv, type MiniAppEnv } from '@/lib/env';
+import {
+  EnvError,
+  getBotEnv,
+  getLlmEnv,
+  getMiniAppEnv,
+  getPdfEnv,
+  type MiniAppEnv,
+  type PdfEnv,
+} from '@/lib/env';
 import { createLlm } from '@/llm/client';
 import { llmConfigFromEnv } from '@/llm/config';
 import { createPipelineDeps } from '@/pipeline/deps';
 import type { PipelineDeps } from '@/pipeline/run';
 
-import { createAppApi, type AppApi } from './api';
+import { createAppApi, type AppApi, type AppApiDeps, type IdHandler } from './api';
+import { buildPdfLink, pdfLinkKey } from './pdf-link';
+import { buildShareResult } from './share';
 import { createAppDbStore } from './store';
 
 const log = (line: string): void => console.log(line);
@@ -31,6 +41,63 @@ function createNotify(): NonNullable<PipelineDeps['notify']> {
 
 let api: AppApi | undefined;
 let miniAppEnv: MiniAppEnv | undefined;
+let pdfEnv: PdfEnv | undefined;
+
+const miniAppEnvOnce = (): MiniAppEnv => (miniAppEnv ??= getMiniAppEnv());
+
+interface BotClient {
+  api: Api;
+  username: Promise<string>;
+}
+
+// Keyed by which bot signed the initData; the token itself is never a key, logged or returned.
+const botClients = new Map<'prod' | 'dev', BotClient>();
+
+function botClient(bot: 'prod' | 'dev'): BotClient {
+  let client = botClients.get(bot);
+  if (client === undefined) {
+    const env = miniAppEnvOnce();
+    const token = bot === 'prod' ? env.TELEGRAM_BOT_TOKEN : env.TELEGRAM_DEV_BOT_TOKEN;
+    // Unreachable in practice: dev-signed initData only verifies when the dev token is set.
+    if (token === undefined) throw new EnvError('TELEGRAM_DEV_BOT_TOKEN: is required');
+    const botApi = new Api(token);
+    const username = botApi.getMe().then((me) => me.username);
+    // A failed getMe must not stick for the life of the instance.
+    username.catch(() => botClients.delete(bot));
+    client = { api: botApi, username };
+    botClients.set(bot, client);
+  }
+  return client;
+}
+
+const share: AppApiDeps['share'] = async (input) => {
+  const client = botClient(input.bot);
+  const result = buildShareResult({
+    issueId: input.issueId,
+    number: input.number,
+    headline: input.headline,
+    botUsername: await client.username,
+  });
+  // Saved on every tap: a prepared message expires, so its id is never cached.
+  const prepared = await client.api.savePreparedInlineMessage(input.telegramUserId, result, {
+    allow_user_chats: true,
+    allow_group_chats: true,
+    allow_channel_chats: true,
+    allow_bot_chats: false,
+  });
+  return prepared.id;
+};
+
+const pdfLink: AppApiDeps['pdfLink'] = ({ issueId, number }) => {
+  const env = (pdfEnv ??= getPdfEnv());
+  return buildPdfLink({
+    appUrl: env.APP_URL,
+    key: pdfLinkKey(env.TELEGRAM_BOT_TOKEN),
+    issueId,
+    number,
+    now: new Date(),
+  });
+};
 
 /** Built on the first request, never at import time (keeps `next build` secret-free). */
 export function getAppApi(): AppApi {
@@ -39,7 +106,7 @@ export function getAppApi(): AppApi {
     const channelDeps = { store: createChannelsDbStore(db), source: createInteractiveSource() };
     api = createAppApi({
       store: createAppDbStore(db),
-      env: () => (miniAppEnv ??= getMiniAppEnv()),
+      env: miniAppEnvOnce,
       now: () => new Date(),
       addChannel: (userId, username, limit) => addUserChannel(channelDeps, userId, username, limit),
       pipeline: () =>
@@ -48,6 +115,8 @@ export function getAppApi(): AppApi {
           notify: createNotify(),
         }),
       schedule: (task) => after(task),
+      share,
+      pdfLink,
       log,
     });
   }
@@ -63,7 +132,8 @@ const misconfigured = (error: unknown): Response => {
   );
 };
 
-type Simple = Exclude<keyof AppApi, 'getIssue'>;
+type WithId = 'getIssue' | 'deleteIssue' | 'shareIssue' | 'pdfLink';
+type Simple = Exclude<keyof AppApi, WithId>;
 
 /** Route-file adapter: a wiring failure (e.g. no DATABASE_URL) answers 500, never throws. */
 export function appHandler(name: Simple): (req: Request) => Promise<Response> {
@@ -78,12 +148,18 @@ export function appHandler(name: Simple): (req: Request) => Promise<Response> {
   };
 }
 
-export async function handleGetIssue(req: Request, id: string): Promise<Response> {
-  let handler: AppApi['getIssue'];
-  try {
-    handler = getAppApi().getIssue;
-  } catch (error) {
-    return misconfigured(error);
-  }
-  return handler(req, id);
+type RouteContext = { params: Promise<{ id: string }> };
+
+/** Route-file adapter for /api/app/issues/[id]/*; a wiring failure answers 500, never throws. */
+export function appIdHandler(name: WithId): (req: Request, ctx: RouteContext) => Promise<Response> {
+  return async (req, ctx) => {
+    const { id } = await ctx.params;
+    let handler: IdHandler;
+    try {
+      handler = getAppApi()[name];
+    } catch (error) {
+      return misconfigured(error);
+    }
+    return handler(req, id);
+  };
 }

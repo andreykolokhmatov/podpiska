@@ -82,6 +82,8 @@ export class FakeIssueStore implements IssueStore {
       error: string | null;
       content: unknown;
       history: string[];
+      /** Mirrors issues.deleted_at: numbering keeps it, lastReadyPeriodEnd skips it. */
+      deletedAt?: Date;
     }
   >();
   channels: UserChannelRow[] = [];
@@ -144,7 +146,10 @@ export class FakeIssueStore implements IssueStore {
   }
   async lastReadyPeriodEnd(userId: number) {
     const ends = [...this.issues.values()]
-      .filter((issue) => issue.userId === userId && issue.status === 'ready')
+      .filter(
+        (issue) =>
+          issue.userId === userId && issue.status === 'ready' && issue.deletedAt === undefined,
+      )
       .map((issue) => issue.periodEnd.getTime());
     return ends.length === 0 ? undefined : new Date(Math.max(...ends));
   }
