@@ -8,6 +8,16 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Native feel: no visible scrollbars anywhere; scrolling still works. */
+html,
+html * {
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
 .pd-root,
 .pd-outside {
   font-family: var(
@@ -72,54 +82,6 @@ body {
   margin: 0;
 }
 
-/* ---------- onboarding ---------- */
-
-.pd-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 16px 24px 8px;
-}
-
-.pd-hero__accent {
-  margin: 16px 0 6px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--tgui--accent_text_color);
-}
-
-.pd-hero__title {
-  margin: 0;
-  max-width: 320px;
-  font-size: 28px;
-  line-height: 1.15;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--tgui--text_color);
-}
-
-.pd-emoji {
-  position: relative;
-  display: grid;
-  place-items: center;
-}
-
-.pd-emoji__anim {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.pd-emoji__anim[data-ready='true'] {
-  opacity: 1;
-}
-
-.pd-emoji__static {
-  line-height: 1;
-}
-
 .pd-footnote {
   margin: 4px 24px 0;
   text-align: center;
@@ -144,6 +106,29 @@ body {
   color: var(--tgui--destructive_text_color);
 }
 
+/* ---------- animated emoji ---------- */
+
+.pd-emoji {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.pd-emoji__anim {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.pd-emoji__anim[data-ready='true'] {
+  opacity: 1;
+}
+
+.pd-emoji__static {
+  line-height: 1;
+}
+
 /* ---------- icons ---------- */
 
 .pd-icon {
@@ -152,78 +137,16 @@ body {
   flex-shrink: 0;
 }
 
-.pd-icon--square {
-  border-radius: 8px;
-}
-
-.pd-icon--round {
-  border-radius: 50%;
-}
-
 .pd-chevron {
   color: var(--tgui--hint_color);
   opacity: 0.6;
   flex-shrink: 0;
 }
 
-.pd-after {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pd-after__value {
-  color: var(--tgui--hint_color);
-  font-size: 17px;
-}
-
 .pd-headline {
   display: block;
   font-weight: 600;
   line-height: 1.3;
-}
-
-/* ---------- hub ---------- */
-
-.pd-hub__header {
-  display: grid;
-  grid-template-columns: 48px 1fr 48px;
-  align-items: center;
-  padding: 4px 16px 8px;
-}
-
-.pd-hub__title {
-  margin: 0;
-  text-align: center;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--tgui--text_color);
-}
-
-.pd-round-button {
-  justify-self: end;
-  width: 40px;
-  height: 40px;
-  border-radius: 50% !important;
-  padding: 0 !important;
-  display: grid !important;
-  place-items: center;
-}
-
-.pd-avatar {
-  display: block;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.pd-avatar--initials {
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, #72d5fd, #2a9ef1);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
 }
 
 .pd-status-spinner {
@@ -233,60 +156,99 @@ body {
   height: 30px;
 }
 
-/* ---------- checklist (НАЧАЛО РАБОТЫ) ---------- */
+/* ---------- hub ---------- */
 
-.pd-step {
-  position: relative;
+.pd-large-title {
+  margin: 4px 16px 0;
+  font-size: 32px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--tgui--text_color);
+}
+
+.pd-link {
+  color: var(--tgui--link_color);
+  font-size: 16px;
+}
+
+/* Accent "+" like Telegram's «Add contact» rows: icon in the 40px avatar column. */
+.pd-add-icon {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  box-sizing: border-box;
-  border-radius: 50%;
-  font-size: 15px;
-  font-weight: 600;
+  width: 40px;
+  height: 28px;
+  color: var(--tgui--link_color);
 }
 
-/* Connector to the next step's circle, drawn through the cell divider. */
-.pd-step:not([data-last='true'])::after {
-  content: '';
-  position: absolute;
-  top: 34px;
-  left: 50%;
-  width: 2px;
-  height: 30px;
-  transform: translateX(-50%);
-  border-radius: 1px;
-  background: var(--tgui--hint_color);
-  opacity: 0.3;
+.pd-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  color: var(--tgui--subtitle_text_color, var(--tgui--hint_color));
+  font-size: 16px;
+  line-height: 1.35;
 }
 
-.pd-step--done {
-  background: #34c759;
-  color: #fff;
-}
-
-.pd-step--done::after {
-  background: #34c759 !important;
-  opacity: 0.6 !important;
-}
-
-.pd-step--current {
-  background: var(--tgui--button_color);
-  color: var(--tgui--button_text_color);
-}
-
-.pd-step--todo {
-  border: 2px solid color-mix(in srgb, var(--tgui--hint_color) 45%, transparent);
+.pd-muted {
   color: var(--tgui--hint_color);
 }
 
-.pd-checklist [class*='tgui'] {
-  overflow: visible;
+.pd-empty {
+  padding-top: 16px;
+  padding-bottom: 4px;
 }
 
-.pd-step-cell--done {
-  opacity: 0.55;
+/* ---------- onboarding: feature intro ---------- */
+
+.pd-intro {
+  box-sizing: border-box;
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+  padding: calc(32px + var(--tg-viewport-content-safe-area-inset-top, 0px)) 28px 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.pd-intro__title {
+  margin: 20px 0 10px;
+  max-width: 320px;
+  color: var(--tgui--text_color);
+}
+
+.pd-intro__text {
+  margin: 0;
+  color: var(--tgui--hint_color);
+  line-height: 1.4;
+}
+
+.pd-intro__features {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+  align-self: stretch;
+}
+
+.pd-intro__features li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--tgui--text_color);
+}
+
+.pd-intro__privacy {
+  margin-top: auto;
+  padding-top: 28px;
 }
 
 /* ---------- forms ---------- */

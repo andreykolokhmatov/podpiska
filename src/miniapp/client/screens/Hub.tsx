@@ -1,42 +1,43 @@
 'use client';
 
-import { Cell, IconButton, Section, Spinner } from '@telegram-apps/telegram-ui';
-import { Archive, ChevronRight, CircleAlert, Hourglass, Plus, Radio, Sparkles } from 'lucide-react';
+import {
+  Avatar,
+  ButtonCell,
+  Cell,
+  Placeholder,
+  Section,
+  Spinner,
+} from '@telegram-apps/telegram-ui';
+import { Archive, ChevronRight, CircleAlert, Hourglass, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import type { MeResponse } from '@/miniapp/contract';
-
-import {
-  buildButtonView,
-  deriveChecklist,
-  failureText,
-  progressLabel,
-  quotaText,
-  type BuildState,
-} from '../build';
-import { Checklist } from '../components/Checklist';
+import { buildButtonView, failureText, progressLabel, quotaText, type BuildState } from '../build';
 import { ColorIcon } from '../components/ColorIcon';
 import { IssueCard } from '../components/IssueCard';
-import { UserAvatar } from '../components/UserAvatar';
-import { issueUrl } from '../env';
-import { useAppearance, useBackButton, useMainButton, useTma } from '../hooks';
+import { NewspaperEmoji } from '../components/NewspaperEmoji';
+import { initials, issueUrl } from '../env';
+import { useAppearance, useBackButton, useMainButton } from '../hooks';
 import { navigateFull } from '../sdk';
 import { t } from '../texts';
 import { useIssueBuild } from '../useIssueBuild';
+import type { HomeData } from './Home';
+
+const CHANNELS_INLINE = 5;
 
 interface HubProps {
-  me: MeResponse;
+  data: HomeData;
 }
 
 const chevron = <ChevronRight className="pd-chevron" size={20} />;
 
-export function Hub({ me }: HubProps) {
+export function Hub({ data }: HubProps) {
+  const { me, channels, interests } = data;
   const router = useRouter();
-  const { user } = useTma();
   const appearance = useAppearance();
   const [quota, setQuota] = useState(me.quota);
   const openIssue = (id: string) => navigateFull(issueUrl(id, appearance));
+  const channelCount = channels.length;
 
   const { state, start } = useIssueBuild({
     inFlight: me.inFlight,
@@ -45,79 +46,101 @@ export function Hub({ me }: HubProps) {
   });
 
   useBackButton(null);
-  useMainButton(buildButtonView(state, { channelCount: me.channels.count, quota }), () => {
+  useMainButton(buildButtonView(state, { channelCount, quota }), () => {
     void start();
   });
 
-  const steps = deriveChecklist({
-    channelCount: me.channels.count,
-    hasInterests: me.hasInterests,
-    hasIssue: me.latestIssue !== null,
-  });
-  const quotaLine = quotaText(quota);
+  const issueFooter = channelCount === 0 ? t.hub.needChannels : quotaText(quota);
+  const status = <BuildStatus state={state} />;
 
   return (
-    <main className="pd-page pd-hub">
-      <header className="pd-hub__header">
-        <UserAvatar user={user} />
-        <h1 className="pd-hub__title">{t.appName}</h1>
-        <IconButton
-          mode="bezeled"
-          size="m"
-          className="pd-round-button"
-          aria-label={t.hub.add}
-          onClick={() => router.push('/channels?add=1')}
-        >
-          <Plus size={22} strokeWidth={2.4} />
-        </IconButton>
-      </header>
+    <main className="pd-page">
+      <h1 className="pd-large-title">{t.hub.title}</h1>
 
-      <BuildStatus state={state} />
-
-      {steps && (
-        <Checklist
-          steps={steps}
-          onStep={(id) => router.push(id === 'channels' ? '/channels?add=1' : '/interests')}
-        />
+      {me.latestIssue ? (
+        <Section header={t.hub.latestHeader} footer={issueFooter ?? undefined}>
+          {status}
+          <IssueCard issue={me.latestIssue} onOpen={openIssue} />
+        </Section>
+      ) : (
+        <>
+          {state.kind === 'idle' ? (
+            <Placeholder
+              className="pd-empty"
+              header={t.hub.emptyTitle}
+              description={channelCount === 0 ? t.hub.emptyNoChannels : t.hub.emptyReady}
+            >
+              <NewspaperEmoji size={112} />
+            </Placeholder>
+          ) : (
+            <Section>{status}</Section>
+          )}
+          {channelCount > 0 && issueFooter && <p className="pd-footnote">{issueFooter}</p>}
+        </>
       )}
 
-      {me.latestIssue && <IssueCard issue={me.latestIssue} onOpen={openIssue} />}
-
-      <Section header={t.hub.menuHeader}>
-        <Cell
-          before={<ColorIcon icon={Radio} color="blue" />}
-          after={
-            <span className="pd-after">
-              {me.channels.count > 0 && (
-                <span className="pd-after__value">{me.channels.count}</span>
-              )}
-              {chevron}
+      <Section
+        header={t.hub.channelsHeader(channelCount)}
+        footer={channelCount === 0 ? t.hub.channelsFooter : undefined}
+      >
+        <ButtonCell
+          before={
+            <span className="pd-add-icon">
+              <Plus size={22} strokeWidth={2.4} />
             </span>
           }
-          subtitle={me.channels.count === 0 ? t.hub.channelsEmpty : undefined}
-          onClick={() => router.push('/channels')}
+          onClick={() => router.push('/channels?add=1')}
         >
-          {t.hub.channels}
-        </Cell>
+          {t.hub.addChannel}
+        </ButtonCell>
+        {channels.slice(0, CHANNELS_INLINE).map((channel) => (
+          <Cell
+            key={channel.username}
+            before={
+              <Avatar
+                size={40}
+                src={channel.avatarUrl ?? undefined}
+                referrerPolicy="no-referrer"
+                acronym={initials(channel.title ?? channel.username)}
+              />
+            }
+            subtitle={`@${channel.username}`}
+            onClick={() => router.push('/channels')}
+          >
+            {channel.title?.trim() || `@${channel.username}`}
+          </Cell>
+        ))}
+        {channelCount > CHANNELS_INLINE && (
+          <ButtonCell onClick={() => router.push('/channels')}>
+            {t.hub.showAll(channelCount)}
+          </ButtonCell>
+        )}
+      </Section>
+
+      <Section header={t.hub.interestsHeader} footer={t.hub.interestsFooter}>
         <Cell
-          before={<ColorIcon icon={Sparkles} color="orange" />}
           after={chevron}
-          subtitle={me.hasInterests ? t.hub.interestsSet : t.hub.interestsEmpty}
+          multiline
+          subtitle={interests ? undefined : t.hub.interestsEmptyHint}
           onClick={() => router.push('/interests')}
         >
-          {t.hub.interests}
+          {interests ? (
+            <span className="pd-preview">{interests}</span>
+          ) : (
+            <span className="pd-muted">{t.hub.interestsEmpty}</span>
+          )}
         </Cell>
+      </Section>
+
+      <Section>
         <Cell
           before={<ColorIcon icon={Archive} color="purple" />}
           after={chevron}
-          subtitle={t.hub.archiveSubtitle}
           onClick={() => router.push('/archive')}
         >
           {t.hub.archive}
         </Cell>
       </Section>
-
-      {quotaLine && <p className="pd-footnote">{quotaLine}</p>}
     </main>
   );
 }
@@ -127,54 +150,54 @@ function BuildStatus({ state }: { state: BuildState }) {
     case 'starting':
     case 'polling':
       return (
-        <Section>
-          <Cell
-            Component="div"
-            before={
-              <span className="pd-status-spinner">
-                <Spinner size="s" />
-              </span>
-            }
-            subtitle={t.hub.buildingSubtitle}
-            multiline
-          >
-            {state.kind === 'polling' ? progressLabel(state.issue) : t.hub.buildingTitle}
-          </Cell>
-        </Section>
+        <Cell
+          Component="div"
+          before={
+            <span className="pd-status-spinner">
+              <Spinner size="s" />
+            </span>
+          }
+          subtitle={t.hub.buildingSubtitle}
+          multiline
+        >
+          {state.kind === 'polling' ? progressLabel(state.issue) : t.hub.buildingTitle}
+        </Cell>
       );
     case 'ready':
       return (
-        <Section>
-          <Cell Component="div" before={<Spinner size="s" />} subtitle={t.hub.openingSubtitle}>
-            {t.hub.openingTitle}
-          </Cell>
-        </Section>
+        <Cell
+          Component="div"
+          before={
+            <span className="pd-status-spinner">
+              <Spinner size="s" />
+            </span>
+          }
+          subtitle={t.hub.openingSubtitle}
+        >
+          {t.hub.openingTitle}
+        </Cell>
       );
     case 'failed':
       return (
-        <Section>
-          <Cell
-            Component="div"
-            before={<ColorIcon icon={CircleAlert} color="red" />}
-            subtitle={failureText(state.failure)}
-            multiline
-          >
-            {t.hub.failedTitle}
-          </Cell>
-        </Section>
+        <Cell
+          Component="div"
+          before={<ColorIcon icon={CircleAlert} color="red" />}
+          subtitle={failureText(state.failure)}
+          multiline
+        >
+          {t.hub.failedTitle}
+        </Cell>
       );
     case 'slow':
       return (
-        <Section>
-          <Cell
-            Component="div"
-            before={<ColorIcon icon={Hourglass} color="orange" />}
-            subtitle={t.hub.slowSubtitle}
-            multiline
-          >
-            {t.hub.slowTitle}
-          </Cell>
-        </Section>
+        <Cell
+          Component="div"
+          before={<ColorIcon icon={Hourglass} color="orange" />}
+          subtitle={t.hub.slowSubtitle}
+          multiline
+        >
+          {t.hub.slowTitle}
+        </Cell>
       );
     case 'idle':
       return null;

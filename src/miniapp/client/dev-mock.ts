@@ -72,6 +72,8 @@ const CHANNELS: ChannelView[] = [
   { username: 'rbc_news', title: 'РБК', avatarUrl: null, available: true },
   { username: 'banksta', title: 'Banksta', avatarUrl: null, available: true },
   { username: 'old_channel', title: 'Старый канал', avatarUrl: null, available: false },
+  { username: 'tass_agency', title: 'ТАСС', avatarUrl: null, available: true },
+  { username: 'omskzdes', title: 'Омск здесь', avatarUrl: null, available: true },
 ];
 
 function initialMe(scenario: Scenario): MeResponse {

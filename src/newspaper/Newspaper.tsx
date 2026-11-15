@@ -12,7 +12,7 @@ import {
   Section,
   SideSection,
 } from './blocks';
-import { isSectionEmpty } from './format';
+import { isSectionEmpty, normalizeIssueDashes } from './format';
 
 export type NewspaperTheme = 'light' | 'dark';
 
@@ -23,7 +23,8 @@ interface NewspaperProps {
 }
 
 /** The whole issue as static markup: slots are placed by class, mobile order comes from CSS. */
-export function Newspaper({ issue, theme }: NewspaperProps) {
+export function Newspaper({ issue: raw, theme }: NewspaperProps) {
+  const issue = normalizeIssueDashes(raw);
   const briefs = issue.briefs ?? [];
   const curiosities = issue.curiosities ?? [];
   const events = issue.events ?? [];

@@ -51,6 +51,14 @@ html:has(.np) {
 html:has(.np) body {
   margin: 0;
 }
+/* No visible scrollbars (Mini App WebView and desktop alike); scrolling itself is unchanged. */
+html:has(.np),
+html:has(.np) * {
+  scrollbar-width: none;
+}
+html:has(.np) ::-webkit-scrollbar {
+  display: none;
+}
 @media (prefers-color-scheme: dark) {
   html:has(.np:not([data-theme='light'])) {
     background: #15140f;

@@ -5,7 +5,6 @@ import type { IssueState } from '@/miniapp/contract';
 import {
   buildButtonView,
   buildReducer,
-  deriveChecklist,
   failureText,
   initialBuildState,
   nextPollDelay,
@@ -215,30 +214,19 @@ describe('buildButtonView', () => {
 });
 
 describe('quotaText', () => {
-  it('hidden for the owner, counts down otherwise', () => {
+  it('hidden for the owner, counts down with plural forms otherwise', () => {
     expect(quotaText(null)).toBeNull();
-    expect(quotaText({ limit: 3, used: 0, remaining: 3 })).toBe('Осталось 3 из 3 сегодня');
-    expect(quotaText({ limit: 3, used: 2, remaining: 1 })).toBe('Осталось 1 из 3 сегодня');
-    expect(quotaText({ limit: 3, used: 4, remaining: -1 })).toBe('Осталось 0 из 3 сегодня');
-  });
-});
-
-describe('deriveChecklist', () => {
-  it('first undone step is current', () => {
-    expect(deriveChecklist({ channelCount: 0, hasInterests: false, hasIssue: false })).toEqual([
-      { id: 'channels', index: 1, state: 'current' },
-      { id: 'interests', index: 2, state: 'todo' },
-      { id: 'issue', index: 3, state: 'todo' },
-    ]);
-    expect(
-      deriveChecklist({ channelCount: 2, hasInterests: false, hasIssue: true })?.map(
-        (s) => s.state,
-      ),
-    ).toEqual(['done', 'current', 'done']);
-  });
-
-  it('hidden once all three are done', () => {
-    expect(deriveChecklist({ channelCount: 1, hasInterests: true, hasIssue: true })).toBeNull();
+    expect(quotaText({ limit: 3, used: 0, remaining: 3 })).toBe(
+      'Можно собрать ещё 3 выпуска сегодня.',
+    );
+    expect(quotaText({ limit: 3, used: 2, remaining: 1 })).toBe(
+      'Можно собрать ещё 1 выпуск сегодня.',
+    );
+    expect(quotaText({ limit: 5, used: 0, remaining: 5 })).toBe(
+      'Можно собрать ещё 5 выпусков сегодня.',
+    );
+    expect(quotaText({ limit: 3, used: 3, remaining: 0 })).toMatch(/закончились/);
+    expect(quotaText({ limit: 3, used: 4, remaining: -1 })).toMatch(/закончились/);
   });
 });
 

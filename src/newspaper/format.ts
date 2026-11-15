@@ -108,3 +108,26 @@ export function unitKey(
 ): string {
   return `${unit.sources[0]?.postUrl ?? ''}|${text}|${index}`;
 }
+
+/** House style: the en dash «–» everywhere; the LLM and the bot copy tend to emit «—». */
+export function normalizeDashes(text: string): string {
+  return text.replaceAll('—', '–');
+}
+
+const URL_KEYS = new Set(['postUrl', 'url', 'href']);
+
+/** normalizeDashes over every text field of an issue; URLs are left untouched. */
+export function normalizeIssueDashes<T>(value: T): T {
+  return normalizeDeep(value) as T;
+}
+
+function normalizeDeep(value: unknown): unknown {
+  if (typeof value === 'string') return normalizeDashes(value);
+  if (Array.isArray(value)) return value.map(normalizeDeep);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, v]) => [key, URL_KEYS.has(key) ? v : normalizeDeep(v)]),
+    );
+  }
+  return value;
+}

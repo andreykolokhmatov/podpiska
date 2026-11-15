@@ -107,7 +107,7 @@ describe('createBot', () => {
     expect(store.upsertUser).toHaveBeenCalledWith(expect.objectContaining({ id: from.id }));
     const [reply, ...rest] = replies(calls);
     expect(rest).toHaveLength(0);
-    expect(reply?.payload.text).toBe('📰 Подписка — ваша личная газета из Telegram-каналов.');
+    expect(reply?.payload.text).toBe('📰 Подписка – ваша личная газета из Telegram-каналов.');
     expect(reply?.payload.parse_mode).toBeUndefined();
     expect(webAppUrl(reply)).toBe(APP_URL);
   });

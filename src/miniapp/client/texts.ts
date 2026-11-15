@@ -19,7 +19,7 @@ export const apiErrorText: Record<ClientErrorCode, string> = {
   bad_request: 'Некорректный запрос. Обновите приложение и попробуйте ещё раз.',
   not_found: 'Не нашли то, что вы ищете. Возможно, его уже удалили.',
   too_long: `Слишком длинный текст: не больше ${INTERESTS_MAX} символов.`,
-  busy: 'Выпуск уже собирается — дождитесь его.',
+  busy: 'Выпуск уже собирается – дождитесь его.',
   limit: `На сегодня выпуски закончились: не больше ${DAILY_BUILDS} в день. Возвращайтесь завтра.`,
   limit_global: 'Редакция сегодня перегружена. Попробуйте собрать выпуск завтра.',
   no_channels: 'Сначала добавьте хотя бы один канал.',
@@ -40,7 +40,7 @@ export function errorText(code: ClientErrorCode, limit?: number): string {
 }
 
 export const issueErrorText: Record<IssueErrorCode, string> = {
-  no_channels: 'В подписке нет каналов — добавьте хотя бы один.',
+  no_channels: 'В подписке нет каналов – добавьте хотя бы один.',
   no_posts: 'В ваших каналах не нашлось новых постов за последние сутки.',
   collect_failed: 'Не получилось прочитать каналы: Telegram не ответил. Попробуйте позже.',
   digest_failed: 'Редакция не смогла прочитать каналы. Попробуйте ещё раз.',
@@ -48,6 +48,14 @@ export const issueErrorText: Record<IssueErrorCode, string> = {
   timeout: 'Сборка заняла слишком много времени. Попробуйте ещё раз.',
   internal: 'Что-то пошло не так при сборке. Попробуйте ещё раз.',
 };
+
+function pluralIssues(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'выпуск';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'выпуска';
+  return 'выпусков';
+}
 
 export const t = {
   appName: 'Подписка',
@@ -59,54 +67,41 @@ export const t = {
   loadFailed: 'Не удалось загрузить',
   retry: 'Повторить',
   onboarding: {
-    accent: 'Ваша личная газета',
     title: 'Весь Telegram в одной подписке',
-    benefits: [
-      {
-        id: 'channels',
-        title: 'Любые публичные каналы',
-        subtitle: 'Добавьте каналы — подписываться на них не нужно',
-      },
-      {
-        id: 'interests',
-        title: 'Только то, что вам интересно',
-        subtitle: 'Опишите интересы своими словами — редакция отберёт главное',
-      },
-      {
-        id: 'paper',
-        title: 'Свёрстано как газета',
-        subtitle: 'Каждая заметка ведёт на исходный пост в канале',
-      },
+    text: 'Добавьте публичные каналы и расскажите, что вам интересно. Подписка соберёт из них газету.',
+    features: [
+      { id: 'channels', text: 'Любые публичные каналы – без подписки на них' },
+      { id: 'interests', text: 'Отбор и пересказ по вашим интересам' },
+      { id: 'paper', text: 'Как настоящая газета: рубрики и ссылка на каждый пост' },
     ],
     privacy: 'Политика конфиденциальности',
     start: 'НАЧАТЬ',
   },
   hub: {
-    add: 'Добавить канал',
-    checklistHeader: 'НАЧАЛО РАБОТЫ',
-    steps: {
-      channels: {
-        title: 'Добавьте каналы',
-        subtitle: 'Откуда брать новости',
-      },
-      interests: { title: 'Опишите интересы', subtitle: 'Что важно, а что пропустить' },
-      issue: { title: 'Соберите первый выпуск', subtitle: 'Нажмите «Собрать выпуск» внизу' },
-    },
+    title: 'Подписка',
     latestHeader: 'ПОСЛЕДНИЙ ВЫПУСК',
-    menuHeader: 'НАСТРОЙКИ',
-    channels: 'Каналы',
-    channelsEmpty: 'Пока нет каналов',
-    interests: 'Интересы',
-    interestsSet: 'Заданы',
+    read: 'Читать',
+    emptyTitle: 'Здесь появится ваша газета',
+    emptyNoChannels: 'Добавьте каналы ниже, и редакция соберёт из них первый выпуск.',
+    emptyReady: 'Нажмите «Собрать выпуск» – первый номер будет готов через пару минут.',
+    channelsHeader: (count: number) => (count > 0 ? `КАНАЛЫ · ${count}` : 'КАНАЛЫ'),
+    addChannel: 'Добавить канал',
+    showAll: (count: number) => `Показать все (${count})`,
+    channelsFooter: 'Только публичные каналы. Подписываться на них не нужно.',
+    interestsHeader: 'ИНТЕРЕСЫ',
     interestsEmpty: 'Не заданы',
-    archive: 'Архив',
-    archiveSubtitle: 'Все выпуски',
+    interestsEmptyHint: 'Расскажите, о чём писать подробнее, а что пропускать',
+    interestsFooter: 'Редакция отбирает и сокращает новости по этому описанию.',
+    archive: 'Архив выпусков',
+    quotaLeft: (n: number) => `Можно собрать ещё ${n} ${pluralIssues(n)} сегодня.`,
+    quotaNone: 'На сегодня выпуски закончились – завтра можно снова.',
+    needChannels: 'Чтобы собрать выпуск, добавьте хотя бы один канал.',
     build: 'СОБРАТЬ ВЫПУСК',
     buildingTitle: 'Выпуск собирается',
     buildingSubtitle: 'Обычно это занимает 1–3 минуты',
     failedTitle: 'Не удалось собрать выпуск',
     slowTitle: 'Собирается дольше обычного',
-    slowSubtitle: 'Загляните чуть позже — выпуск появится в архиве',
+    slowSubtitle: 'Загляните чуть позже – выпуск появится в архиве',
     openingTitle: 'Выпуск готов',
     openingSubtitle: 'Открываем газету…',
   },
@@ -127,7 +122,7 @@ export const t = {
     confirmTitle: 'Удалить канал?',
     confirmText: (name: string) => `${name} больше не попадёт в ваши выпуски.`,
     emptyTitle: 'Пока нет каналов',
-    emptyText: 'Добавьте первый канал — например, @username любимого издания.',
+    emptyText: 'Добавьте первый канал – например, @username любимого издания.',
     added: (name: string) => `${name} добавлен`,
     exists: (name: string) => `${name} уже в подписке`,
   },
@@ -151,7 +146,7 @@ export const t = {
     header: 'ВЫПУСКИ',
     more: 'Показать ещё',
     emptyTitle: 'Выпусков пока нет',
-    emptyText: 'Соберите первый выпуск на главной — он появится здесь.',
+    emptyText: 'Соберите первый выпуск на главной – он появится здесь.',
   },
   issueTitle: (number: number) => `Выпуск № ${number}`,
   issueMeta: (number: number, dateline: string) => `№ ${number} · ${dateline}`,

@@ -49,6 +49,13 @@ async function start(): Promise<TmaEnv | null> {
   initData.restore();
   backButton.mount.ifAvailable();
   mainButton.mount.ifAvailable();
+  // Start from a known hidden state: the restored one may not match what Telegram shows, and the
+  // SDK only posts changes. Each screen then shows its own button.
+  mainButton.setParams.ifAvailable({
+    isVisible: false,
+    isLoaderVisible: false,
+    hasShineEffect: false,
+  });
   themeParams.mount.ifAvailable();
   themeParams.bindCssVars.ifAvailable();
   miniApp.mount.ifAvailable();

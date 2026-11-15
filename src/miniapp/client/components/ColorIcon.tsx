@@ -1,41 +1,38 @@
 import type { LucideIcon } from 'lucide-react';
 
-/** Telegram-settings palette for cell icons. */
+/** Telegram Settings palette: solid tiles, white glyphs. */
 export const iconColors = {
   blue: '#007aff',
+  sky: '#2aabee',
   orange: '#ff9500',
-  green: '#34c759',
-  purple: '#af52de',
   red: '#ff3b30',
-  teal: '#30b0c7',
-  indigo: '#5856d6',
   pink: '#ff2d55',
+  purple: '#af52de',
+  green: '#34c759',
+  grey: '#8e8e93',
 } as const;
 export type IconColor = keyof typeof iconColors;
 
 interface ColorIconProps {
   icon: LucideIcon;
   color: IconColor;
-  /** square: solid tile with a white glyph (hub cells); round: tinted circle (onboarding). */
-  shape?: 'square' | 'round';
   size?: number;
 }
 
-export function ColorIcon({ icon: Icon, color, shape = 'square', size = 30 }: ColorIconProps) {
-  const value = iconColors[color];
-  const round = shape === 'round';
+/** A Telegram-Settings icon: saturated rounded square (radius ≈ 23% of the side), white glyph. */
+export function ColorIcon({ icon: Icon, color, size = 30 }: ColorIconProps) {
   return (
     <span
-      className={`pd-icon ${round ? 'pd-icon--round' : 'pd-icon--square'}`}
+      className="pd-icon"
       style={{
         width: size,
         height: size,
-        background: round ? `color-mix(in srgb, ${value} 16%, transparent)` : value,
-        color: round ? value : '#fff',
+        borderRadius: Math.round(size * 0.233),
+        background: iconColors[color],
       }}
       aria-hidden
     >
-      <Icon size={Math.round(size * (round ? 0.5 : 0.6))} strokeWidth={2.2} />
+      <Icon size={Math.round(size * 0.6)} strokeWidth={2.2} color="#fff" />
     </span>
   );
 }

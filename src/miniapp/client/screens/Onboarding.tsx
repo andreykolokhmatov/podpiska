@@ -1,6 +1,6 @@
 'use client';
 
-import { Cell, Section } from '@telegram-apps/telegram-ui';
+import { Text, Title } from '@telegram-apps/telegram-ui';
 import { Newspaper, Radio, Sparkles, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 
@@ -14,16 +14,17 @@ import { useAppearance, useBackButton, useMainButton } from '../hooks';
 import { haptic } from '../sdk';
 import { errorText, t } from '../texts';
 
-const BENEFIT_ICONS: Record<string, { icon: LucideIcon; color: IconColor }> = {
+const FEATURE_ICONS: Record<string, { icon: LucideIcon; color: IconColor }> = {
   channels: { icon: Radio, color: 'blue' },
   interests: { icon: Sparkles, color: 'orange' },
-  paper: { icon: Newspaper, color: 'green' },
+  paper: { icon: Newspaper, color: 'red' },
 };
 
 interface OnboardingProps {
   onDone: () => void;
 }
 
+/** Feature-intro screen (like Telegram's own Premium / Stories intros), not a list of cells. */
 export function Onboarding({ onDone }: OnboardingProps) {
   const appearance = useAppearance();
   const [saving, setSaving] = useState(false);
@@ -51,34 +52,29 @@ export function Onboarding({ onDone }: OnboardingProps) {
   );
 
   return (
-    <main className="pd-page pd-onboarding">
-      <header className="pd-hero">
-        <NewspaperEmoji size={128} />
-        <p className="pd-hero__accent">{t.onboarding.accent}</p>
-        <h1 className="pd-hero__title">{t.onboarding.title}</h1>
-      </header>
-      <Section className="pd-benefits">
-        {t.onboarding.benefits.map((benefit) => {
-          const icon = BENEFIT_ICONS[benefit.id] ?? { icon: Newspaper, color: 'blue' };
+    <main className="pd-intro">
+      <NewspaperEmoji size={144} />
+      <Title level="1" weight="1" Component="h1" className="pd-intro__title">
+        {t.onboarding.title}
+      </Title>
+      <Text className="pd-intro__text">{t.onboarding.text}</Text>
+      <ul className="pd-intro__features">
+        {t.onboarding.features.map((feature) => {
+          const icon = FEATURE_ICONS[feature.id] ?? { icon: Newspaper, color: 'blue' };
           return (
-            <Cell
-              key={benefit.id}
-              Component="div"
-              before={<ColorIcon icon={icon.icon} color={icon.color} shape="round" size={44} />}
-              subtitle={benefit.subtitle}
-              multiline
-            >
-              {benefit.title}
-            </Cell>
+            <li key={feature.id}>
+              <ColorIcon icon={icon.icon} color={icon.color} size={26} />
+              <Text>{feature.text}</Text>
+            </li>
           );
         })}
-      </Section>
+      </ul>
       {error && (
         <p className="pd-message pd-message--error" role="alert">
           {errorText(error.error)}
         </p>
       )}
-      <p className="pd-footnote">
+      <p className="pd-footnote pd-intro__privacy">
         <a href={privacyUrl(appearance)}>{t.onboarding.privacy}</a>
       </p>
     </main>

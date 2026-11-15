@@ -10,7 +10,7 @@ const channelLabel = (username: string, title: string | null): string =>
     : `«${truncateTitle(title.trim())}» (@${username})`;
 
 export const texts = {
-  welcome: '📰 Подписка — ваша личная газета из Telegram-каналов.',
+  welcome: '📰 Подписка – ваша личная газета из Telegram-каналов.',
   openApp: 'Открыть Подписку',
   menuButton: 'Открыть',
   startCommand: 'Открыть Подписку',
@@ -23,7 +23,7 @@ export const texts = {
     'Это приватный канал. Подписка читает только публичные каналы с адресом вида t.me/username.',
   notChannel:
     'Это не канал. Перешлите пост из публичного канала или пришлите ссылку вида t.me/username.',
-  addlist: 'Папки пока не поддерживаются — пришлите каналы по одному.',
+  addlist: 'Папки пока не поддерживаются – пришлите каналы по одному.',
   notFound: 'Канал не найден, у него закрыто веб-превью или это не канал.',
   invalid: 'Не получилось разобрать адрес канала. Пришлите ссылку вида t.me/username.',
   retryLater: 'Telegram сейчас не отвечает. Попробуйте позже.',

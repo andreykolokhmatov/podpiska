@@ -141,42 +141,10 @@ export function buildButtonView(state: BuildState, ctx: BuildContext): MainButto
   }
 }
 
-/** «Осталось N из 3 сегодня»; null hides the line (owner). */
+/** Footer under the issue section; null for the owner (no quota). */
 export function quotaText(quota: Quota | null): string | null {
   if (quota === null) return null;
-  return `Осталось ${Math.max(0, quota.remaining)} из ${quota.limit} сегодня`;
-}
-
-export type ChecklistStepId = 'channels' | 'interests' | 'issue';
-export type ChecklistStepState = 'done' | 'current' | 'todo';
-
-export interface ChecklistStep {
-  id: ChecklistStepId;
-  index: number;
-  state: ChecklistStepState;
-}
-
-export interface ChecklistInput {
-  channelCount: number;
-  hasInterests: boolean;
-  hasIssue: boolean;
-}
-
-/** НАЧАЛО РАБОТЫ steps; null once every step is done (the checklist hides). */
-export function deriveChecklist(input: ChecklistInput): ChecklistStep[] | null {
-  const done: Record<ChecklistStepId, boolean> = {
-    channels: input.channelCount > 0,
-    interests: input.hasInterests,
-    issue: input.hasIssue,
-  };
-  const ids: ChecklistStepId[] = ['channels', 'interests', 'issue'];
-  if (ids.every((id) => done[id])) return null;
-  const current = ids.find((id) => !done[id]);
-  return ids.map((id, i) => ({
-    id,
-    index: i + 1,
-    state: done[id] ? 'done' : id === current ? 'current' : 'todo',
-  }));
+  return quota.remaining > 0 ? t.hub.quotaLeft(quota.remaining) : t.hub.quotaNone;
 }
 
 /** Russian text for a failed build. */

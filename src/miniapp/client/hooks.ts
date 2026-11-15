@@ -61,6 +61,28 @@ export function useMainButton(view: MainButtonView | null, onClick: () => void):
     });
   }, [visible, text, enabled, loader, shine]);
 
+  // Back from the newspaper may restore this page from bfcache: no effect re-runs, while the
+  // newspaper has hidden the native button. Toggle so both calls really reach Telegram.
+  const resync = useEffectEvent(() => {
+    mainButton.setParams.ifAvailable({ isVisible: false });
+    if (visible) {
+      mainButton.setParams.ifAvailable({
+        isVisible: true,
+        text,
+        isEnabled: enabled,
+        isLoaderVisible: loader,
+        hasShineEffect: shine,
+      });
+    }
+  });
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) resync();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
   useEffect(() => {
     const off = mainButton.onClick.ifAvailable(() => handle());
     return () => {

@@ -9,6 +9,8 @@ import {
   groupSeparator,
   groupSources,
   isPostUrl,
+  normalizeDashes,
+  normalizeIssueDashes,
   pluralRu,
 } from './format';
 
@@ -114,5 +116,36 @@ describe('isPostUrl', () => {
     'https://t.me/a/1?x=1',
   ])('rejects %s', (url) => {
     expect(isPostUrl(url)).toBe(false);
+  });
+});
+
+describe('normalizeDashes', () => {
+  it('turns em dashes into en dashes, spaced or not', () => {
+    expect(normalizeDashes('Омск — столица')).toBe('Омск – столица');
+    expect(normalizeDashes('Тюмень—Омск — трасса')).toBe('Тюмень–Омск – трасса');
+    expect(normalizeDashes('без тире - и – так')).toBe('без тире - и – так');
+    expect(normalizeDashes('')).toBe('');
+  });
+
+  it('normalizes every text field of an issue but leaves URLs alone', () => {
+    const doc = {
+      lead: { headline: 'А — Б', sources: [s('a—b', 'пост — 1', 'a/1')] },
+      facts: ['x — y'],
+      count: 3,
+      empty: null,
+      weird: { url: 'https://example.com/a—b', href: 'https://t.me/a—b' },
+    };
+    const out = normalizeIssueDashes(doc);
+    expect(out.lead.headline).toBe('А – Б');
+    expect(out.lead.sources[0]).toEqual({
+      channel: 'a–b',
+      label: 'пост – 1',
+      postUrl: 'https://t.me/a/1',
+    });
+    expect(out.facts).toEqual(['x – y']);
+    expect(out.count).toBe(3);
+    expect(out.empty).toBeNull();
+    expect(out.weird).toEqual({ url: 'https://example.com/a—b', href: 'https://t.me/a—b' });
+    expect(doc.lead.headline).toBe('А — Б');
   });
 });

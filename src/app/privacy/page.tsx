@@ -4,7 +4,7 @@ import { parseTheme } from '../issue/theme';
 import { MiniAppBridge } from '@/miniapp/client/MiniAppBridge';
 
 export const metadata: Metadata = {
-  title: 'Политика конфиденциальности — Подписка',
+  title: 'Политика конфиденциальности – Подписка',
   description: 'Какие данные собирает Подписка и куда они передаются',
 };
 
@@ -20,6 +20,8 @@ interface PrivacyPageProps {
 
 const CSS = `
 body{margin:0}
+html,html *{scrollbar-width:none}
+::-webkit-scrollbar{display:none}
 .pv{--bg:#fff;--fg:#1c1c1e;--muted:#6d6d72;--rule:#e5e5ea;--link:#007aff;
   color-scheme:light;background:var(--bg);color:var(--fg);min-height:100vh;
   font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -43,12 +45,12 @@ export default async function PrivacyPage({ searchParams }: PrivacyPageProps) {
       <style>{CSS}</style>
       <main>
         <h1>Политика конфиденциальности</h1>
-        <p className="muted">Подписка — персональная газета из Telegram-каналов.</p>
+        <p className="muted">Подписка – персональная газета из Telegram-каналов.</p>
 
         <h2>Что мы храним</h2>
         <ul>
           <li>
-            Ваш Telegram ID, имя пользователя и имя — их передаёт Telegram при открытии приложения.
+            Ваш Telegram ID, имя пользователя и имя – их передаёт Telegram при открытии приложения.
           </li>
           <li>Список каналов, которые вы добавили в подписку.</li>
           <li>Текст ваших интересов.</li>
@@ -77,7 +79,7 @@ export default async function PrivacyPage({ searchParams }: PrivacyPageProps) {
 
         <hr />
         <p className="muted">
-          Подписка — открытый проект: код доступен, сервис можно развернуть у себя со своим ключом.
+          Подписка – открытый проект: код доступен, сервис можно развернуть у себя со своим ключом.
         </p>
       </main>
       <MiniAppBridge />
