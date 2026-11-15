@@ -59,9 +59,10 @@ export type DraftSource = z.infer<typeof draftSource>;
 
 export const ISSUE_SCHEMA_VERSION = 1;
 
-const postUrlSchema = z
-  .url({ protocol: /^https$/, hostname: /^t\.me$/ })
-  .regex(/^https:\/\/t\.me\/[a-z0-9_]+\/\d+$/);
+/** The only post link shape the newspaper renders: https://t.me/<channel>/<id>. */
+export const POST_URL_RE = /^https:\/\/t\.me\/[a-z0-9_]+\/\d+$/;
+
+const postUrlSchema = z.url({ protocol: /^https$/, hostname: /^t\.me$/ }).regex(POST_URL_RE);
 
 export const sourceSchema = z.object({
   channel: z.string().min(1),
