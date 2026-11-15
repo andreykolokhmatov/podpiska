@@ -1,0 +1,149 @@
+import { sql } from 'drizzle-orm';
+import {
+  bigint,
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
+
+const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
+
+export const users = pgTable('users', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  telegramId: bigint('telegram_id', { mode: 'number' }).notNull().unique(),
+  username: text('username'),
+  firstName: text('first_name'),
+  interestsPrompt: text('interests_prompt'),
+  createdAt: createdAt(),
+});
+
+export const channels = pgTable(
+  'channels',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    username: text('username').notNull().unique(),
+    title: text('title'),
+    avatarUrl: text('avatar_url'),
+    lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
+    isAvailable: boolean('is_available').notNull().default(true),
+  },
+  (table) => [
+    check('channels_username_lowercase', sql`${table.username} = lower(${table.username})`),
+  ],
+);
+
+export const userChannels = pgTable(
+  'user_channels',
+  {
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    channelId: integer('channel_id')
+      .notNull()
+      .references(() => channels.id, { onDelete: 'cascade' }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.channelId] }),
+    index('user_channels_channel_id_idx').on(table.channelId),
+  ],
+);
+
+// No url column: post links are derived in code from channel username + tg_post_id.
+export const posts = pgTable(
+  'posts',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    channelId: integer('channel_id')
+      .notNull()
+      .references(() => channels.id, { onDelete: 'cascade' }),
+    tgPostId: integer('tg_post_id').notNull(),
+    text: text('text'),
+    html: text('html'),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+    views: integer('views'),
+    hasMedia: boolean('has_media').notNull().default(false),
+  },
+  (table) => [
+    unique('posts_channel_id_tg_post_id_unique').on(table.channelId, table.tgPostId),
+    index('posts_channel_id_published_at_idx').on(table.channelId, table.publishedAt),
+  ],
+);
+
+export const channelDigests = pgTable(
+  'channel_digests',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    channelId: integer('channel_id')
+      .notNull()
+      .references(() => channels.id, { onDelete: 'cascade' }),
+    // Calendar day in Europe/Moscow, computed by application code (not by the DB).
+    day: date('day', { mode: 'string' }).notNull(),
+    summaryJson: jsonb('summary_json').notNull(),
+    model: text('model').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [unique('channel_digests_channel_id_day_unique').on(table.channelId, table.day)],
+);
+
+export const issueStatuses = [
+  'pending',
+  'collecting',
+  'digesting',
+  'composing',
+  'ready',
+  'failed',
+] as const;
+
+export type IssueStatus = (typeof issueStatuses)[number];
+
+export const issues = pgTable(
+  'issues',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+    status: text('status').$type<IssueStatus>().notNull().default('pending'),
+    contentJson: jsonb('content_json'),
+    error: text('error'),
+    statsJson: jsonb('stats_json'),
+    // Fan-in counter for the QStash pipeline: compose runs once digests_done = digests_total.
+    digestsTotal: integer('digests_total').notNull().default(0),
+    digestsDone: integer('digests_done').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique('issues_user_id_number_unique').on(table.userId, table.number),
+    index('issues_user_id_created_at_idx').on(table.userId, table.createdAt),
+    check(
+      'issues_status_check',
+      sql.raw(`"status" in (${issueStatuses.map((status) => `'${status}'`).join(', ')})`),
+    ),
+  ],
+);
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type Channel = typeof channels.$inferSelect;
+export type NewChannel = typeof channels.$inferInsert;
+export type UserChannel = typeof userChannels.$inferSelect;
+export type NewUserChannel = typeof userChannels.$inferInsert;
+export type Post = typeof posts.$inferSelect;
+export type NewPost = typeof posts.$inferInsert;
+export type ChannelDigest = typeof channelDigests.$inferSelect;
+export type NewChannelDigest = typeof channelDigests.$inferInsert;
+export type Issue = typeof issues.$inferSelect;
+export type NewIssue = typeof issues.$inferInsert;

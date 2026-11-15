@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Подписка № 4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400;1,700&family=PT+Serif:ital,wght@0,400;0,700;1,400&family=Old+Standard+TT:ital@0;1&family=PT+Sans+Narrow:wght@400;700&display=swap">
+<style>
+/* Layout: one continuous newspaper column (max 640px), no page breaks and no multi-column splits; sections divided by double rules, one spot colour like a newsprint second ink. */
+:root{
+  --paper:#F4F0E7; --ink:#16140F; --muted:#615B4F; --rule:#C4BDAE; --tint:#ECE6D8;
+  --spot:#A1281C; --inv-bg:#16140F; --inv-fg:#F4F0E7;
+  --f-mast:'Playfair Display',Georgia,serif;
+  --f-body:'PT Serif',Georgia,'Times New Roman',serif;
+  --f-old:'Old Standard TT',Georgia,serif;
+  --f-label:'PT Sans Narrow','Arial Narrow',system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#15140F; --ink:#ECE6D8; --muted:#A69F90; --rule:#3B372F; --tint:#1E1C16;
+  --spot:#E58A73; --inv-bg:#ECE6D8; --inv-fg:#15140F; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#15140F; --ink:#ECE6D8; --muted:#A69F90; --rule:#3B372F; --tint:#1E1C16;
+  --spot:#E58A73; --inv-bg:#ECE6D8; --inv-fg:#15140F; color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-body);-webkit-text-size-adjust:100%}
+.paper{max-width:640px;margin:0 auto;padding-block:18px 36px;padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:max(18px,env(safe-area-inset-right,0px))}
+p{margin:0;font-size:17.5px;line-height:1.62;hyphens:auto;-webkit-hyphens:auto}
+p + p{margin-top:.75em}
+a{color:inherit}
+
+/* ---------- masthead ---------- */
+.strip{display:flex;justify-content:space-between;gap:12px;font-family:var(--f-label);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-bottom:8px;border-bottom:1px solid var(--ink)}
+.name{font-family:var(--f-mast);font-weight:900;font-size:clamp(60px,19vw,104px);line-height:.92;text-align:center;letter-spacing:-.015em;margin:14px 0 14px}
+.motto{font-family:var(--f-old);font-style:italic;font-size:15.5px;text-align:center;color:var(--muted)}
+.dateline{margin-top:10px;border-top:3px double var(--ink);border-bottom:1px solid var(--ink);padding:8px 0;text-align:center;font-family:var(--f-old);font-size:17px}
+.ears{display:grid;grid-template-columns:1fr 1fr;margin-top:14px;margin-bottom:4px;border:1px solid var(--ink)}
+.ear{padding:10px 12px;text-align:center;font-family:var(--f-label);font-size:13.5px;line-height:1.3;color:var(--muted)}
+.ear + .ear{border-left:1px solid var(--ink)}
+.ear small{display:block;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--spot);font-weight:700}
+.ear b{display:block;font-family:var(--f-mast);font-weight:900;font-size:24px;line-height:1.1;margin:3px 0 4px;color:var(--ink)}
+
+/* contents */
+.contents{margin-top:16px;display:flex;flex-wrap:wrap;gap:6px 0;font-family:var(--f-label);font-size:14px;letter-spacing:.06em;text-transform:uppercase}
+.contents a{text-decoration:none;padding:3px 0}
+.contents a:not(:last-child)::after{content:"·";margin:0 9px;color:var(--rule)}
+.contents a:focus-visible,.contents a:hover{color:var(--spot)}
+
+/* ---------- article furniture ---------- */
+.kick{font-family:var(--f-label);font-weight:700;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--spot);margin-bottom:6px}
+h1.hed,h2.hed{font-family:var(--f-mast);font-weight:900;line-height:1.06;margin:0 0 12px;text-wrap:balance;letter-spacing:-.005em}
+h1.hed{font-size:clamp(32px,9.2vw,46px)}
+h2.hed{font-size:clamp(27px,7.4vw,36px)}
+.deck{font-family:var(--f-old);font-style:italic;font-size:19px;line-height:1.42;margin:0 0 16px}
+.byline{font-family:var(--f-label);font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:14px}
+.drop::first-letter{float:left;font-family:var(--f-mast);font-weight:900;font-size:4.1em;line-height:.8;padding:7px 9px 0 0;color:var(--ink)}
+.lead{margin-top:26px}
+
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:2px solid var(--ink);border-bottom:1px solid var(--ink);margin:4px 0 20px}
+.facts div{padding:10px 6px 9px;text-align:center;min-width:0}
+.facts div + div{border-left:1px solid var(--rule)}
+.facts b{display:block;font-family:var(--f-mast);font-weight:900;font-size:24px;line-height:1.05;font-variant-numeric:lining-nums}
+.facts span{display:block;margin-top:4px;font-family:var(--f-old);font-style:italic;font-size:13px;line-height:1.3;color:var(--muted)}
+
+/* section heads */
+.sec{margin:44px 0 18px;text-align:center;scroll-margin-top:16px}
+.sec h2{display:flex;align-items:center;gap:14px;font-family:var(--f-mast);font-weight:900;font-size:24px;letter-spacing:.08em;text-transform:uppercase;margin:0}
+.sec h2::before,.sec h2::after{content:"";flex:1;height:6px;border-top:3px solid var(--ink);border-bottom:1px solid var(--ink)}
+.sec p{font-family:var(--f-old);font-style:italic;font-size:15px;color:var(--muted);margin-top:6px}
+
+/* stories */
+.story{padding:16px 0;border-top:1px solid var(--rule)}
+.sec + .story,.story:first-child{border-top:0;padding-top:0}
+.story h3{font-family:var(--f-mast);font-weight:700;font-size:22px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+.story p{font-size:17px}
+.story .byline{margin-top:8px}
+.byline a{color:inherit;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px;text-decoration-thickness:1px}
+.byline a:hover,.byline a:focus-visible{color:var(--spot);text-decoration-color:currentColor}
+
+/* boxes */
+.brief{margin-top:30px;background:var(--tint);border:1px solid var(--ink);padding:16px 18px 6px}
+.brief h3,.curio h3{font-family:var(--f-mast);font-weight:900;font-size:22px;text-align:center;margin:0 0 4px;padding-bottom:10px;border-bottom:2px solid var(--ink)}
+.brief ul,.curio ul{list-style:none;margin:0;padding:0}
+.brief li,.curio li{font-size:16.5px;line-height:1.5;padding:11px 0;border-bottom:1px dotted var(--rule)}
+.brief li:last-child,.curio li:last-child{border-bottom:0}
+.brief b{font-family:var(--f-label);font-size:13.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--spot)}
+.quote{margin:36px 0 0;padding:20px 6px;border-top:3px solid var(--ink);border-bottom:3px solid var(--ink);text-align:center}
+.quote blockquote{margin:0;font-family:var(--f-mast);font-style:italic;font-size:27px;line-height:1.22}
+.quote figcaption{margin-top:10px;font-family:var(--f-label);font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.inverse{background:var(--inv-bg);color:var(--inv-fg);padding:14px 16px;margin:18px 0 0}
+.inverse .kick{color:var(--inv-fg);opacity:.8}
+.inverse p{font-size:16.5px}
+.curio{margin-top:40px;border:1px solid var(--ink);padding:16px 18px 6px}
+
+/* afisha */
+.afisha{border-top:2px solid var(--ink)}
+.ev{display:grid;grid-template-columns:96px minmax(0,1fr);gap:14px;padding:12px 0;border-bottom:1px solid var(--rule);align-items:baseline}
+.ev b{font-family:var(--f-mast);font-weight:900;font-size:17px;line-height:1.2;font-variant-numeric:lining-nums}
+.ev span{font-size:16.5px;line-height:1.45}
+
+.colophon{margin-top:34px;padding-top:14px;border-top:3px double var(--ink);font-family:var(--f-old);font-style:italic;font-size:14.5px;line-height:1.5;text-align:center;color:var(--muted)}
+.end{text-align:center;font-family:var(--f-label);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:10px}
+
+/* ---------- phone/tablet: keep reading order ---------- */
+main{display:flex;flex-direction:column}
+.front,.main-col,.side-col,.lower{display:contents}
+.lead{order:1}.brief{order:2}#aviaciya{order:3}#omsk{order:4}.quote{order:5}#ii{order:6}#dengi{order:7}#mir{order:8}.curio{order:9}#afisha{order:10}
+
+/* ---------- desktop broadsheet ---------- */
+@media (min-width:1024px){
+  .paper{max-width:1240px;padding-block:28px 48px}
+  .mast{display:grid;grid-template-columns:230px minmax(0,1fr) 230px;align-items:center;column-gap:28px}
+  .mast .strip{grid-column:1/-1}
+  .mast .ears{display:contents}
+  .mast .ear{border:1px solid var(--ink);grid-row:2;align-self:center}
+  .mast .ear:first-child{grid-column:1}
+  .mast .ear + .ear{grid-column:3;border-left:1px solid var(--ink)}
+  .mast .name{grid-column:2;grid-row:2;font-size:132px;margin:18px 0 14px}
+  .mast .dateline{grid-column:1/-1;font-size:18px;margin-top:4px}
+
+  main{display:block}
+  .front{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:0 36px;margin-top:26px}
+  .main-col,.side-col,.lower{display:block}
+  .side-col{border-left:1px solid var(--ink);padding-left:28px}
+  .lead{margin-top:0}
+  h1.hed{font-size:56px;line-height:1.02}
+  .lead .deck{font-size:21px;max-width:44em}
+  .lead p,#aviaciya p{max-width:40em}
+  .facts{max-width:none}
+  #aviaciya .sec{margin-top:40px}
+  .brief{margin-top:0}
+  .quote{margin-top:24px}
+  .quote blockquote{font-size:25px}
+  #omsk .sec{margin:30px 0 12px}
+  #omsk .sec h2{font-size:20px}
+  .story h3{font-size:20px}
+  .side-col .story p{font-size:16px}
+  .curio{margin-top:28px}
+
+  .lower{margin-top:12px}
+  #ii .ii-wrap{display:grid}
+  #ii{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:0 36px}
+  #ii .sec{grid-column:1/-1}
+  #ii > article{min-width:0}
+  #ii .ii-list{margin-top:0!important;border-left:1px solid var(--rule);padding-left:28px}
+  #dengi,#mir{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 28px}
+  #dengi .sec,#mir .sec{grid-column:1/-1}
+  #dengi .story,#mir .story{border-top:0;padding:0 0 18px;border-bottom:1px solid var(--rule);margin-bottom:18px}
+  #dengi .story,#mir .story{padding-top:0}
+  .afisha{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:2px solid var(--ink);border-width:2px 0 0}
+  .ev{grid-template-columns:1fr;gap:4px;padding:14px 16px 14px 0;border-bottom:1px solid var(--rule)}
+  .ev + .ev{}
+  .ev:not(:nth-child(4n+1)){padding-left:16px;border-left:1px solid var(--rule)}
+  .colophon{max-width:760px;margin-left:auto;margin-right:auto}
+
+  .main-col .curio{margin-top:36px}
+  .main-col .curio ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 24px}
+  .main-col .curio li{border-bottom:0;padding:12px 0}
+  .main-col .curio li + li{border-left:1px dotted var(--rule);padding-left:24px}
+  #ii{grid-template-areas:"sec sec" "art list" "extra list";grid-template-rows:auto auto 1fr}
+  #ii .sec{grid-area:sec}
+  #ii > article{grid-area:art}
+  #ii .ii-list{grid-area:list}
+  #ii .ii-extra{grid-area:extra;align-self:start;display:grid;grid-template-columns:1fr 1fr;gap:0 28px;margin-top:22px;border-top:1px solid var(--ink);padding-top:16px}
+  #ii .ii-extra .story{border-top:0;padding-top:0}
+  .ev{display:flex;flex-direction:column;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+
+<div class="paper">
+  <header class="mast">
+    <div class="strip"><span>Выпуск № 4</span><span>218 сообщений · 73 канала</span></div>
+    <div class="name">Подписка</div>
+    <div class="dateline">Вечерние новости за 14 ноября 2026</div>
+    <div class="ears">
+      <div class="ear"><small>Погода в номере</small><b>Первый снег</b>Омск припорошило за ночь, днём 0…+2, гололедица</div>
+      <div class="ear"><small>Цифра дня</small><b>10 000+</b>рейсов задержано или отменено в США</div>
+    </div>
+  </header>
+
+  <main>
+   <div class="front">
+    <div class="main-col">
+    <article class="lead" id="glavnoe">
+      <div class="kick">Большая тройка · АТЭС</div>
+      <h1 class="hed">Трамп, Путин и Си встретятся 19 ноября в Шэньчжэне. Тема — ядерное оружие</h1>
+      <div class="deck">Белый дом анонсировал, Кремль подтвердил. А Зеленский рассказал о неожиданном вопросе американцев: НАТО в обмен на Донбасс</div>
+      <div class="facts">
+        <div><b>19.11</b><span>встреча на полях саммита АТЭС</span></div>
+        <div><b>3</b><span>страны за одним столом</span></div>
+        <div><b>0</b><span>соглашений, которых ждут в Вашингтоне</span></div>
+      </div>
+      <p class="drop">Утром в Белом доме объявили о трёхсторонней встрече Дональда Трампа, Владимира Путина и Си Цзиньпина. По словам представителя администрации Оливии Уэйлс, Трамп хочет обсудить сокращение ядерного оружия в мире, распространение которого он считает крайне опасным. Один из американских чиновников оговорился: соглашения на встрече не ждут, но надеются, что она откроет продуктивный диалог. Для Китая, по его словам, тема сложная.</p>
+      <p>Вечером Дмитрий Песков подтвердил: лидеры встретятся 19 ноября в Шэньчжэне на полях саммита АТЭС, договорённость достигнута. Он же ответил на вопрос о европейцах в переговорах по Украине. Россия «не может и не хочет ставить условия» по составу европейской группы, сама такая постановка вопроса, по его словам, неправильная. Но с европейцами стоило бы сначала обсудить их позицию.</p>
+      <p>Главную интригу дня добавил Владимир Зеленский. По его словам, американцы впервые спросили: «А если Украина будет в НАТО, Украина выйдет из Донбасса?» Сами американские переговорщики о таком предложении не сообщали. Зеленский сказал, что готов обсуждать тему, если Киев получит обширный пакет безопасности с гарантиями НАТО и ЕС, оружием и финансированием армии.</p>
+      <p>Помощь Европы при этом не безгранична. Польша и Болгария заявили, что не смогут дать Украине дополнительных денег. Дональд Туск объяснил это дефицитом бюджета и собственными расходами на оборону: в программу закупки американского оружия PURL Варшава больше вкладываться не будет.</p>
+      <div class="byline">КОНТЕКСТ: <a href="https://t.me/kontext_channel/80856" target="_blank" rel="noopener">Белый дом</a> · <a href="https://t.me/kontext_channel/80878" target="_blank" rel="noopener">Кремль</a> · <a href="https://t.me/kontext_channel/80873" target="_blank" rel="noopener">Песков</a> · <a href="https://t.me/kontext_channel/80860" target="_blank" rel="noopener">Зеленский</a> · <a href="https://t.me/kontext_channel/80877" target="_blank" rel="noopener">Туск</a></div>
+    </article>
+    <section id="aviaciya">
+      <div class="sec"><h2>Авиация</h2><p>Коллапс в небе США</p></div>
+      <article>
+        <h2 class="hed">Старая медная проводка остановила все вылеты в Америке</h2>
+        <p class="drop">В ночь на 14 ноября США на несколько часов запретили взлёты из всех аэропортов страны: в центрах управления воздушным движением отказала связь. Самолётам в воздухе разрешили долететь, таких бортов было около 3500. Задержано или отменено больше 10 тысяч рейсов. Последний раз такое случалось в январе 2023 года.</p>
+        <p>Совпадение сразу заметили: 10 ноября FAA развернуло во всех 22 региональных центрах ИИ-систему SMART, которая анализирует больше 200 потоков данных и прогнозирует обстановку в небе. В каналах первым делом обвинили её и устаревшее оборудование.</p>
+        <p>Министр транспорта Шон Даффи дал другую версию. Кибератаку и иностранное вмешательство власти исключают. Подрядчик FAA, компания L3Harris, вёл плановые работы и менял старые медные провода на оптоволокно, а из-за возраста меди что-то пошло не так. Чья это ошибка, пока не ясно.</p>
+        <div class="inverse"><div class="kick">Ещё из США</div><p>В Новом Орлеане танкер Atlantic Asphalt врезался в пришвартованное круизное судно American Heritage, оно начало набирать воду. Демократы в Сенате попросили Маска сохранить все документы о работе Starlink.</p></div>
+        <div class="byline"><a href="https://t.me/xor_journal/10508" target="_blank" rel="noopener">XOR</a> · <a href="https://t.me/aioftheday/5521" target="_blank" rel="noopener">AI Central</a> · <a href="https://t.me/kontext_channel/80882" target="_blank" rel="noopener">КОНТЕКСТ</a> · <a href="https://t.me/imaxairu/24529" target="_blank" rel="noopener">Максим Горшенин</a></div>
+      </article>
+    </section>
+    <aside class="curio">
+      <h3>Курьёзы</h3>
+      <ul>
+        <li>Серая «Лада» заехала прямо в «Гипер Ленту» на Энтузиастов, развернулась между рядами и уехала.</li>
+        <li>Дуров о Хуанге: совет директоров прав, ведь женатый человек подписал эксклюзивный контракт со штрафом 50% за выход и без гарантии аптайма.</li>
+        <li>Беспилотное такси можно остановить обычным знаком STOP в руках.</li>
+      </ul>
+    </aside>
+    </div>
+    <div class="side-col">
+    <aside class="brief">
+      <h3>В двух словах</h3>
+      <ul>
+        <li><b>Помилование.</b> Путин помиловал блогера Лерчек. Штраф в 763 млн ₽ платить не нужно, она получила загранпаспорт и летит лечиться в Китай.</li>
+        <li><b>Казань.</b> На вокзале задержали Юлию Галямину, ей вменяют неповиновение полиции.</li>
+        <li><b>Finiko.</b> Экс-главу Минкомсвязи Никифорова считают одним из создателей пирамиды: 8 тыс. потерпевших, ущерб около 5 млрд ₽.</li>
+        <li><b>Венгрия.</b> Следователи нашли закопанные в лесу миллиарды наличными бывшего министра Шестака.</li>
+        <li><b>Звонки.</b> «Большая четвёрка» операторов и банки договорились о маркировке вызовов.</li>
+        <li><b>Космос.</b> «Союз» с Восточного вывел на орбиту в основном частные спутники, государство впервые доплатило за их запуск.</li>
+        <li><b>Microsoft.</b> Сервисы восстановлены, причиной сбоя назвали техническую неисправность.</li>
+      </ul>
+    </aside>
+    <figure class="quote">
+      <blockquote>«Беру свои слова назад насчёт Fable&nbsp;5.2»</blockquote>
+      <figcaption>Глеб Кудрявцев, через три дня после «эволюции, а не революции»</figcaption>
+    </figure>
+    <section id="omsk">
+      <div class="sec"><h2>Омск</h2><p>Снег, хоккей и фигурное катание</p></div>
+      <div class="story"><h3>«Авангард» разгромил «Нефтехимик» — 5:1</h3><p>В Нижнекамске омичи проигрывали 0:1 после первого периода, а потом забросили пять. Лучшим игроком матча стал Василий Пономарёв, забивший в меньшинстве. Дальше домашняя серия: 18 ноября «Адмирал», 20-го «Барыс», 22-го «Ак Барс».</p><div class="byline"><a href="https://t.me/omskiyavangard/67832" target="_blank" rel="noopener">ХК «Авангард»</a> · <a href="https://t.me/omsk_putevoditel/61791" target="_blank" rel="noopener">Омск_путеводитель</a></div></div>
+      <div class="story"><h3>Взрослые вышли на лёд «Сердца Сибири»</h3><p>После коротких программ лидируют Лев Лазарев и Лидия Плескачёва, в парах Щербинина и Петров, в танцах Кагановская и Некрасов. Омичка Мария Ганина пока 11-я. На трибунах Алексей Ягудин.</p><div class="byline"><a href="https://t.me/otkrytka_omsk/18754" target="_blank" rel="noopener">Открытка из Омска</a></div></div>
+      <div class="story"><h3>«Сто лет моды» останутся до лета</h3><p>144 предмета из Эрмитажа, от Кардена и Армани до Вивьен Вествуд и Зайцева. Выставка в «Эрмитаж-Сибирь» работает до 6 июня 2027 года, билеты 300–600 ₽.</p><div class="byline"><a href="https://t.me/otkrytka_omsk/18746" target="_blank" rel="noopener">Открытка из Омска</a></div></div>
+      <div class="story"><h3>Новый микрорайон у аэропорта</h3><p>На месте складов ГСМ хотят построить 13 домов до пяти этажей, школу на 550 мест и два детских сада.</p><div class="byline"><a href="https://t.me/omsk_putevoditel/61794" target="_blank" rel="noopener">Омск_путеводитель</a></div></div>
+      <div class="story"><h3>Из Пекина в Иркутск снова поездом</h3><p>Рейс через Улан-Батор возвращается после шести лет перерыва: первый поезд 25 ноября, дальше раз в неделю.</p><div class="byline"><a href="https://t.me/omsk_putevoditel/61764" target="_blank" rel="noopener">Омск_путеводитель</a></div></div>
+    </section>
+    </div>
+   </div>
+   <div class="lower">
+    <section id="ii">
+      <div class="sec"><h2>Искусственный интеллект</h2><p>Модели недели и инструменты для агентов</p></div>
+      <article>
+        <h2 class="hed">Fable 5.2 держит в голове больше, Qwen4 догоняет Opus</h2>
+        <div class="deck">По субботним отзывам практиков, модели уже различаются не кодом, а сложными рассуждениями</div>
+        <p class="drop">Глеб Кудрявцев, ещё в среду называвший Fable 5.2 эволюцией, а не революцией, публично передумал. Модель сильно лучше Opus в задачах, где нужно учитывать много взаимосвязанных условий. Его пример: спроектировать дорогу с учётом СНиПов, региональных норм, требований проекта и экономики, то есть нескольких десятков переменных. Fable держит в голове больше параметров и лучше критикует сама себя.</p>
+        <p>По его словам, разница между моделями проходит уже не на уровне кодинга, а в мультидисциплинарных рассуждениях. В еженедельном дайджесте Рефата напоминают: Fable 5.2 и Mythos 5.2 вышли до 30% быстрее и на пятую часть дешевле.</p>
+        <p>С другой стороны подтягиваются китайцы. Автор Senior Software Vlogger считает Qwen4 первым из семейства, кто приблизился к Opus: работает дольше, но результат можно брать в дело. С ним он переписал приложение с Electron на Tauri вместе с новым дизайном.</p>
+        <div class="byline"><a href="https://t.me/gleb_pro_ai/858" target="_blank" rel="noopener">Глеб Кудрявцев</a> · <a href="https://t.me/nobilix/325" target="_blank" rel="noopener">Refat Talks</a> · <a href="https://t.me/seniorsoftwarevlogger/2045" target="_blank" rel="noopener">Senior Software Vlogger</a></div>
+      </article>
+      <div class="ii-extra">
+        <div class="story"><h3>Китайские чипы</h3><p>Чистая прибыль SMIC выросла на 123%, экспорт чипов из Китая за десять месяцев на 111%, до $341 млрд.</p><div class="byline"><a href="https://t.me/prchand/15446" target="_blank" rel="noopener">Китайский свяZноj</a></div></div>
+        <div class="story"><h3>У ИИ-текстов есть автор</h3><p>По Гражданскому кодексу автор тот, чьим творческим трудом создан результат, и для работ с ИИ это тоже действует.</p><div class="byline"><a href="https://t.me/bezsmuzi/20929" target="_blank" rel="noopener">Русский ИТ бизнес</a></div></div>
+      </div>
+      <div class="ii-list">
+        <div class="story"><h3>Кошелёк для агентов</h3><p>OpenAI выдаёт агенту платёжный токен вместо реквизитов карты. Пока каждую покупку надо подтверждать, позже появится лимит трат. Работает только с агентом dots в США.</p><div class="byline"><a href="https://t.me/aioftheday/5522" target="_blank" rel="noopener">AI Central</a></div></div>
+        <div class="story"><h3>Браузер для ИИ</h3><p>Cloudflare открыла код Kitesurf: без интерфейса и без Chromium, на Rust и WebAssembly. Потребляет в семь раз меньше ресурсов, но работает вдвое медленнее и не проходит капчу.</p><div class="byline"><a href="https://t.me/bezsmuzi/20937" target="_blank" rel="noopener">Русский ИТ бизнес</a></div></div>
+        <div class="story"><h3>Навыки для веба</h3><p>Команды Chrome и других браузеров обновили Modern Web Guidance: инструкции агентам по 250 возможностям современных браузеров.</p><div class="byline"><a href="https://t.me/frontendnoteschannel_ru/6093" target="_blank" rel="noopener">Frontender's notes</a></div></div>
+      </div>
+    </section>
+    <section id="dengi">
+      <div class="sec"><h2>Деньги</h2><p>Банки, страховка и рынок труда</p></div>
+      <div class="story"><h3>Сбер: «Стратегия 2029»</h3><p>К 185-летию банк обещает рентабельность капитала не ниже 21%, дивиденды в половину прибыли и роль «архитектора агентной экономики».</p><div class="byline"><a href="https://t.me/imaxairu/24526" target="_blank" rel="noopener">Максим Горшенин</a></div></div>
+      <div class="story"><h3>Страховка дата-центров подорожала в 100 раз</h3><p>Тариф на защиту ЦОД от терактов и диверсий вырос с 0,03–0,06% до 1–5% с 1 октября.</p><div class="byline"><a href="https://t.me/imaxairu/24527" target="_blank" rel="noopener">Максим Горшенин</a></div></div>
+      <div class="story"><h3>Wildberries покупает туры</h3><p>Совет директоров Шереметьево одобрил продажу 75% «Библио-Глобуса» примерно за 40 млрд ₽ с отложенной оплатой.</p><div class="byline"><a href="https://t.me/imaxairu/24523" target="_blank" rel="noopener">Максим Горшенин</a></div></div>
+      <div class="story"><h3>Тысяча откликов в день</h3><p>IT-рекрутер перестала публиковать вакансии: из потока откликов подходят единицы, людей она ищет сама.</p><div class="byline"><a href="https://t.me/bezsmuzi/20927" target="_blank" rel="noopener">Русский ИТ бизнес</a></div></div>
+      <div class="story"><h3>Год в такси</h3><p>Бывший айтишник ушёл в такси за лёгкими деньгами и получил график 6/1 по 12 часов.</p><div class="byline"><a href="https://t.me/bezsmuzi/20939" target="_blank" rel="noopener">Русский ИТ бизнес</a></div></div>
+    </section>
+    <section id="mir">
+      <div class="sec"><h2>Страна и мир</h2></div>
+      <div class="story"><h3>Беспилотники по закону</h3><p>Правительство одобрило закон о высокоавтоматизированных машинах: с 1 сентября 2027 года беспилотники становятся полноправными участниками движения.</p><div class="byline"><a href="https://t.me/imaxairu/24528" target="_blank" rel="noopener">Максим Горшенин</a></div></div>
+      <div class="story"><h3>Лерчек на свободе</h3><p>В Кремле объяснили помилование гуманностью, в СПЧ сказали, что выезд за границу теперь открыт. Вести блог она тоже сможет.</p><div class="byline"><a href="https://t.me/kontext_channel/80857" target="_blank" rel="noopener">КОНТЕКСТ</a></div></div>
+      <div class="story"><h3>Фильм о Китай-городе сняли с показа</h3><p>Показ «Мы не знакомимся» Юлии Гуськовой в Третьяковской галерее перенесли на неопределённый срок.</p><div class="byline"><a href="https://t.me/kontext_channel/80859" target="_blank" rel="noopener">КОНТЕКСТ</a></div></div>
+      <div class="story"><h3>КТЖ молчит</h3><p>В компании заявили, что о задержании главы Елжаса Отыншиева знают только то, что сказано публично.</p><div class="byline"><a href="https://t.me/tengrinews/27872" target="_blank" rel="noopener">Tengrinews</a></div></div>
+      <div class="story"><h3>Ван Гог под вопросом</h3><p>Потомки еврейских владельцев «Цветущих каштанов» требуют снять картину с торгов Sotheby's.</p><div class="byline"><a href="https://t.me/kontext_channel/80880" target="_blank" rel="noopener">КОНТЕКСТ</a></div></div>
+      <div class="story"><h3>Коростелев победил в Финляндии</h3><p>Российский лыжник выиграл 10 км классическим стилем на турнире FIS.</p><div class="byline"><a href="https://t.me/kontext_channel/80870" target="_blank" rel="noopener">КОНТЕКСТ</a></div></div>
+    </section>
+   </div>
+    <section id="afisha">
+      <div class="sec"><h2>Афиша</h2><p>Неделя вперёд</p></div>
+      <div class="afisha">
+        <div class="ev"><b>15 ноября</b><span>Финал Гран-при «Сердце Сибири», G-Drive Арена</span></div>
+        <div class="ev"><b>15 ноября</b><span>День абитуриента и открытие лектория «Достоевский» в ОмГУ</span></div>
+        <div class="ev"><b>18 ноября</b><span>«Авангард» — «Адмирал», первый матч домашней серии</span></div>
+        <div class="ev"><b>19 ноября</b><span>Встреча Трампа, Путина и Си в Шэньчжэне</span></div>
+        <div class="ev"><b>19 ноября</b><span>Anthropic начинает торги на Nasdaq, тикер ANT</span></div>
+        <div class="ev"><b>20 ноября</b><span>Книжный клуб о «Великом Гэтсби», кофейня «Гении пьют кофе»</span></div>
+        <div class="ev"><b>25 ноября</b><span>Первый поезд Пекин — Иркутск через Улан-Батор</span></div>
+        <div class="ev"><b>26 ноября</b><span>«Хоценко о важном»: прямой эфир с губернатором, 19:00</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="colophon">Выпуск собран из постов в Telegram-каналах, на которые подписан читатель, за 14 ноября 2026 года. Тексты пересказаны; позиции сторон по политическим темам переданы как их заявления, без оценки редакции.</div>
+    <div class="end">Подписка · № 4 · Следующий выпуск завтра</div>
+  </footer>
+</div>
+
+</body></html>
