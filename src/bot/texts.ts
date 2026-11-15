@@ -30,4 +30,6 @@ export const texts = {
   failure: 'Что-то пошло не так, попробуйте позже.',
   issueReady: (number: number) => `📰 Выпуск № ${number} готов`,
   openIssue: 'Читать выпуск',
+  schedulePaused: 'Мы приостановили газету – включить снова?',
+  openSchedule: 'Включить',
 } as const;

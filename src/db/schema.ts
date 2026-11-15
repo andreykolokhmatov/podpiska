@@ -9,6 +9,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -17,18 +18,46 @@ import {
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
-export const users = pgTable('users', {
-  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-  telegramId: bigint('telegram_id', { mode: 'number' }).notNull().unique(),
-  username: text('username'),
-  firstName: text('first_name'),
-  interestsPrompt: text('interests_prompt'),
-  // Set when Telegram answers 403 (user blocked the bot); cleared by /start.
-  botBlockedAt: timestamp('bot_blocked_at', { withTimezone: true }),
-  // Set once the user finishes the Mini App onboarding screen.
-  onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
-  createdAt: createdAt(),
-});
+export const scheduleFrequencies = [1, 3, 7] as const;
+
+export const users = pgTable(
+  'users',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    telegramId: bigint('telegram_id', { mode: 'number' }).notNull().unique(),
+    username: text('username'),
+    firstName: text('first_name'),
+    interestsPrompt: text('interests_prompt'),
+    // Set when Telegram answers 403 (user blocked the bot); cleared by /start.
+    botBlockedAt: timestamp('bot_blocked_at', { withTimezone: true }),
+    // Set once the user finishes the Mini App onboarding screen.
+    onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
+    scheduleEnabled: boolean('schedule_enabled').notNull().default(true),
+    scheduleEveryDays: smallint('schedule_every_days').notNull().default(1),
+    // Local hour (0..23) in `timezone` when a scheduled issue comes out.
+    scheduleHour: smallint('schedule_hour').notNull().default(8),
+    // IANA zone reported by the Mini App; null = Europe/Moscow.
+    timezone: text('timezone'),
+    // The next scheduled build; null = the schedule is not active (yet).
+    nextIssueAt: timestamp('next_issue_at', { withTimezone: true }),
+    // Set after unread scheduled issues pile up or the bot cannot reach the user.
+    schedulePausedAt: timestamp('schedule_paused_at', { withTimezone: true }),
+    // Last proof the prod bot may write to the user (/start or write access); null = unknown.
+    canNotifyAt: timestamp('can_notify_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'users_schedule_every_days_check',
+      sql.raw(`"schedule_every_days" in (${scheduleFrequencies.join(', ')})`),
+    ),
+    check(
+      'users_schedule_hour_check',
+      sql`${table.scheduleHour} >= 0 and ${table.scheduleHour} <= 23`,
+    ),
+    index('users_next_issue_at_idx').on(table.nextIssueAt),
+  ],
+);
 
 export const channels = pgTable(
   'channels',
@@ -114,6 +143,10 @@ export const issueStatuses = [
 
 export type IssueStatus = (typeof issueStatuses)[number];
 
+export const issueTriggers = ['manual', 'scheduled'] as const;
+
+export type IssueTrigger = (typeof issueTriggers)[number];
+
 export const issues = pgTable(
   'issues',
   {
@@ -137,6 +170,10 @@ export const issues = pgTable(
     // Soft delete by the owner: hidden from every read path, but still counted for numbering
     // and the daily quota.
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    // Only manual builds count toward the per-user daily quota; both count globally.
+    trigger: text('trigger').$type<IssueTrigger>().notNull().default('manual'),
+    // First time the owner opened the issue inside the Mini App (unread auto issues pause).
+    openedAt: timestamp('opened_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [
@@ -145,6 +182,10 @@ export const issues = pgTable(
     check(
       'issues_status_check',
       sql.raw(`"status" in (${issueStatuses.map((status) => `'${status}'`).join(', ')})`),
+    ),
+    check(
+      'issues_trigger_check',
+      sql.raw(`"trigger" in (${issueTriggers.map((trigger) => `'${trigger}'`).join(', ')})`),
     ),
   ],
 );

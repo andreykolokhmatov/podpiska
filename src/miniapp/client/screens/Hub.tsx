@@ -8,16 +8,32 @@ import {
   Section,
   Spinner,
 } from '@telegram-apps/telegram-ui';
-import { Archive, ChevronRight, CircleAlert, Hourglass, Plus } from 'lucide-react';
+import {
+  Archive,
+  CalendarClock,
+  ChevronRight,
+  CircleAlert,
+  Hourglass,
+  Plus,
+  RotateCw,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { buildButtonView, failureText, progressLabel, quotaText, type BuildState } from '../build';
+import {
+  buildButtonView,
+  canBuild,
+  failureText,
+  progressLabel,
+  quotaText,
+  type BuildState,
+} from '../build';
 import { ColorIcon } from '../components/ColorIcon';
 import { IssueCard } from '../components/IssueCard';
 import { NewspaperEmoji } from '../components/NewspaperEmoji';
 import { initials, issueUrl } from '../env';
 import { useAppearance, useBackButton, useMainButton } from '../hooks';
+import { nextIssueLine } from '../schedule';
 import { navigateFull } from '../sdk';
 import { t } from '../texts';
 import { useIssueBuild } from '../useIssueBuild';
@@ -45,8 +61,13 @@ export function Hub({ data }: HubProps) {
     onQuota: setQuota,
   });
 
+  // With an issue on the hub the build is a quiet ButtonCell; the MainButton is for the first one.
+  const hasIssue = me.latestIssue !== null;
+  const buildable = canBuild({ channelCount, quota });
+  const building = state.kind === 'starting' || state.kind === 'polling' || state.kind === 'ready';
+
   useBackButton(null);
-  useMainButton(buildButtonView(state, { channelCount, quota }), () => {
+  useMainButton(hasIssue ? null : buildButtonView(state, { channelCount, quota }), () => {
     void start();
   });
 
@@ -57,10 +78,34 @@ export function Hub({ data }: HubProps) {
     <main className="pd-page">
       <h1 className="pd-large-title">{t.hub.title}</h1>
 
+      <Section header={t.schedule.hubHeader}>
+        <Cell
+          before={<ColorIcon icon={CalendarClock} color="orange" />}
+          after={chevron}
+          onClick={() => router.push('/schedule')}
+        >
+          {nextIssueLine(me.schedule)}
+        </Cell>
+      </Section>
+
       {me.latestIssue ? (
         <Section header={t.hub.latestHeader} footer={issueFooter ?? undefined}>
           {status}
           <IssueCard issue={me.latestIssue} onOpen={openIssue} />
+          {!building && (
+            <ButtonCell
+              before={
+                <span className="pd-add-icon">
+                  <RotateCw size={20} strokeWidth={2.4} />
+                </span>
+              }
+              disabled={!buildable}
+              className={buildable ? undefined : 'pd-dimmed'}
+              onClick={() => void start()}
+            >
+              {t.hub.buildNow}
+            </ButtonCell>
+          )}
         </Section>
       ) : (
         <>

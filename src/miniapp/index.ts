@@ -18,6 +18,8 @@ import { createLlm } from '@/llm/client';
 import { llmConfigFromEnv } from '@/llm/config';
 import { createPipelineDeps } from '@/pipeline/deps';
 import type { PipelineDeps } from '@/pipeline/run';
+import { applyNotifyOutcome } from '@/schedule/service';
+import { createScheduleDbStore } from '@/schedule/store';
 
 import { createAppApi, type AppApi, type AppApiDeps, type IdHandler } from './api';
 import { buildPdfLink, pdfLinkKey } from './pdf-link';
@@ -30,12 +32,15 @@ function createNotify(): NonNullable<PipelineDeps['notify']> {
   return async (notice) => {
     // Read lazily: a missing bot variable must cost the notice, never the ready issue.
     const env = getBotEnv();
+    const db = getDb();
     const notifier = createIssueNotifier({
       api: new Api(env.TELEGRAM_BOT_TOKEN),
       appUrl: env.APP_URL,
-      store: createBotDbStore(getDb()),
+      store: createBotDbStore(db),
     });
-    log(`[app] notify ${notice.issueId}: ${await notifier(notice)}`);
+    const outcome = await notifier(notice);
+    log(`[app] notify ${notice.issueId}: ${outcome}`);
+    await applyNotifyOutcome(createScheduleDbStore(db), notice.userId, outcome, new Date());
   };
 }
 
@@ -106,6 +111,7 @@ export function getAppApi(): AppApi {
     const channelDeps = { store: createChannelsDbStore(db), source: createInteractiveSource() };
     api = createAppApi({
       store: createAppDbStore(db),
+      schedules: createScheduleDbStore(db),
       env: miniAppEnvOnce,
       now: () => new Date(),
       addChannel: (userId, username, limit) => addUserChannel(channelDeps, userId, username, limit),

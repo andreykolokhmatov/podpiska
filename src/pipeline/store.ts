@@ -15,7 +15,7 @@ import {
 
 import type { Database } from '@/db';
 import { channelDigests, channels, issues, posts, userChannels, users } from '@/db/schema';
-import type { IssueStatus } from '@/db/schema';
+import type { IssueStatus, IssueTrigger } from '@/db/schema';
 
 import { StatusTransitionError } from './errors';
 import type { StoredDigest } from './digest-schema';
@@ -77,7 +77,8 @@ export interface IssueProgress {
 }
 
 export interface IssueStore {
-  create(userId: number, period: TimeRange): Promise<IssueRecord>;
+  /** trigger defaults to 'manual'. */
+  create(userId: number, period: TimeRange, trigger?: IssueTrigger): Promise<IssueRecord>;
   /** Moves from→to atomically; throws StatusTransitionError if the issue is not in `from`. */
   transition(id: string, from: IssueStatus, to: IssueStatus, patch?: IssueProgress): Promise<void>;
   progress(id: string, patch: IssueProgress): Promise<void>;
@@ -175,10 +176,16 @@ export function createIssueDbStore(db: Database): IssueStore {
   });
 
   return {
-    async create(userId, period) {
+    async create(userId, period, trigger = 'manual') {
       const [row] = await db
         .insert(issues)
-        .values({ userId, periodStart: period.start, periodEnd: period.end, status: 'pending' })
+        .values({
+          userId,
+          periodStart: period.start,
+          periodEnd: period.end,
+          status: 'pending',
+          trigger,
+        })
         .returning({
           id: issues.id,
           userId: issues.userId,

@@ -1,7 +1,13 @@
 import { GrammyError } from 'grammy';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createIssueNotifier, issueReadyMessage, type NotifierDeps } from './notify';
+import {
+  createIssueNotifier,
+  issueReadyMessage,
+  schedulePausedMessage,
+  sendSchedulePaused,
+  type NotifierDeps,
+} from './notify';
 
 const APP_URL = 'https://podpiska.example.com';
 const notice = { issueId: '0b1c2d3e-0000-4000-8000-000000000001', userId: 7, number: 4 };
@@ -125,6 +131,63 @@ describe('createIssueNotifier', () => {
     const { notify, store, sendMessage } = setup();
     store.telegramIdOf.mockResolvedValueOnce(undefined as never);
     await expect(notify(notice)).resolves.toBe('skipped');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('sendSchedulePaused', () => {
+  const pausedSetup = (send: () => Promise<unknown> = async () => ({})) => {
+    const store = {
+      telegramIdOf: vi.fn(async (): Promise<number | undefined> => 1001),
+      markBlocked: vi.fn(async () => undefined),
+    };
+    const sendMessage = vi.fn(send);
+    const deps = {
+      api: { sendMessage } as unknown as NotifierDeps['api'],
+      appUrl: APP_URL,
+      store,
+      sleep: vi.fn(async () => undefined),
+    };
+    return { deps, store, sendMessage };
+  };
+
+  it('opens the schedule screen through a web_app button (no callback)', () => {
+    const { text, reply_markup } = schedulePausedMessage(APP_URL);
+    expect(text).toBe('Мы приостановили газету – включить снова?');
+    expect(text).not.toContain('—');
+    const button = reply_markup.inline_keyboard[0]?.[0];
+    expect(button).toMatchObject({ web_app: { url: `${APP_URL}/schedule` } });
+    expect(button).not.toHaveProperty('callback_data');
+  });
+
+  it('sends the message to the user chat', async () => {
+    const { deps, sendMessage } = pausedSetup();
+    await expect(sendSchedulePaused(deps, 7)).resolves.toBe('sent');
+    expect(sendMessage).toHaveBeenCalledWith(
+      1001,
+      'Мы приостановили газету – включить снова?',
+      expect.objectContaining({ reply_markup: expect.anything() }),
+    );
+  });
+
+  it('reports unreachable and blocked like the issue notifier', async () => {
+    const unreachable = pausedSetup(async () => {
+      throw apiError(403, undefined, "Forbidden: bot can't initiate conversation with a user");
+    });
+    await expect(sendSchedulePaused(unreachable.deps, 7)).resolves.toBe('unreachable');
+    expect(unreachable.store.markBlocked).not.toHaveBeenCalled();
+
+    const blocked = pausedSetup(async () => {
+      throw apiError(403, undefined, 'Forbidden: bot was blocked by the user');
+    });
+    await expect(sendSchedulePaused(blocked.deps, 7)).resolves.toBe('blocked');
+    expect(blocked.store.markBlocked).toHaveBeenCalledWith(7);
+  });
+
+  it('skips an unknown or blocked user', async () => {
+    const { deps, store, sendMessage } = pausedSetup();
+    store.telegramIdOf.mockResolvedValueOnce(undefined);
+    await expect(sendSchedulePaused(deps, 7)).resolves.toBe('skipped');
     expect(sendMessage).not.toHaveBeenCalled();
   });
 });

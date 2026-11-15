@@ -62,4 +62,17 @@ describe('dash rule', () => {
     expect(t.issueActions.share).toBe('Поделиться');
     expect(t.issueActions.pdf).toBe('Скачать PDF');
   });
+
+  it('schedule copy', () => {
+    expect(t.schedule.frequencies).toEqual({
+      1: 'Каждый день',
+      3: 'Раз в 3 дня',
+      7: 'Раз в неделю',
+    });
+    expect(t.schedule.pausedNote).toBe(
+      'Приостановлено: последние выпуски остались непрочитанными или бот не смог их прислать. Включите, чтобы продолжить.',
+    );
+    expect(t.schedule.timeZone('Омск (UTC+6)')).toBe('Часовой пояс: Омск (UTC+6)');
+    expect(t.hub.buildNow).toBe('Собрать сейчас');
+  });
 });

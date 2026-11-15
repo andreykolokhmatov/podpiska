@@ -38,28 +38,27 @@ export function daysTouched(start: Date, end: Date): string[] {
   return days;
 }
 
-/** A previous issue older than this is ignored: the daily window falls back to 24h. */
-export const MAX_CARRYOVER_MS = 7 * DAY_MS;
+/** A previous issue may end up to this much earlier than the cap and still be continued. */
+export const CARRYOVER_GRACE_MS = 3 * 3_600_000;
 
 /**
- * The issue window, always ending now.
- * - days = 1: from the previous ready issue's end (if within 7 days), else the last 24h;
- * - days = N > 1: the last N×24h.
+ * The issue window (start, end = now]: continues from the previous ready issue's end when that
+ * lies within maxDays×24h + 3h grace, otherwise covers the last maxDays×24h.
  */
 export function issueWindow(input: {
-  days: number;
+  maxDays: number;
   now: Date;
   previousEnd?: Date | undefined;
 }): Period {
-  const { days, now, previousEnd } = input;
-  if (!Number.isInteger(days) || days < 1) {
-    throw new Error(`days must be a positive integer, got ${days}`);
+  const { maxDays, now, previousEnd } = input;
+  if (!Number.isInteger(maxDays) || maxDays < 1) {
+    throw new Error(`maxDays must be a positive integer, got ${maxDays}`);
   }
   const nowMs = now.getTime();
-  let startMs = nowMs - days * DAY_MS;
-  if (days === 1 && previousEnd !== undefined) {
+  let startMs = nowMs - maxDays * DAY_MS;
+  if (previousEnd !== undefined) {
     const prevMs = previousEnd.getTime();
-    if (prevMs < nowMs && nowMs - prevMs <= MAX_CARRYOVER_MS) startMs = prevMs;
+    if (prevMs < nowMs && prevMs > startMs - CARRYOVER_GRACE_MS) startMs = prevMs;
   }
   const start = new Date(startMs);
   return { start, end: now, days: daysTouched(start, now) };

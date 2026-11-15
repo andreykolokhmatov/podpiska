@@ -83,19 +83,19 @@ const collectStart = (period: Period): Date => {
 
 export interface IssueRunInput {
   userId: number;
-  days: number;
+  /** Longest window: the schedule's every-N-days (1 when off) or the CLI's --days. */
+  maxDays: number;
   interests: string | null;
   refreshDigests?: boolean;
 }
 
-/** The window of the user's next issue (a daily one continues from the last ready issue). */
+/** The window of the user's next issue: continues from the last ready issue, capped at maxDays. */
 export async function planIssuePeriod(
   deps: Pick<PipelineDeps, 'issues' | 'now'>,
-  input: { userId: number; days: number },
+  input: { userId: number; maxDays: number },
 ): Promise<Period> {
-  const previousEnd =
-    input.days === 1 ? await deps.issues.lastReadyPeriodEnd(input.userId) : undefined;
-  return issueWindow({ days: input.days, now: deps.now(), previousEnd });
+  const previousEnd = await deps.issues.lastReadyPeriodEnd(input.userId);
+  return issueWindow({ maxDays: input.maxDays, now: deps.now(), previousEnd });
 }
 
 /** Run state for an issue row that already exists in status pending. */

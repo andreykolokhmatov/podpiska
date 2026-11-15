@@ -10,7 +10,10 @@ export interface TelegramUser {
 }
 
 export interface BotStore {
-  /** Creates or refreshes the user from a private message; clears bot_blocked_at. */
+  /**
+   * Creates or refreshes the user from a private message: clears bot_blocked_at and records that
+   * the bot may write to them (can_notify_at).
+   */
   upsertUser(from: TelegramUser): Promise<{ id: number }>;
   /** Chat id for notifications; undefined if the user is unknown or blocked the bot. */
   telegramIdOf(userId: number): Promise<number | undefined>;
@@ -23,7 +26,11 @@ export interface BotStore {
 export function createBotDbStore(db: Database): BotStore {
   return {
     async upsertUser(from) {
-      const profile = { username: from.username ?? null, firstName: from.first_name };
+      const profile = {
+        username: from.username ?? null,
+        firstName: from.first_name,
+        canNotifyAt: new Date(),
+      };
       const [row] = await db
         .insert(users)
         .values({ telegramId: from.id, ...profile })

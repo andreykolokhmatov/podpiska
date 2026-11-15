@@ -30,38 +30,49 @@ describe('MSK days', () => {
 describe('issueWindow', () => {
   // 10:16 MSK on 15 November.
   const now = new Date('2026-11-15T07:16:00Z');
+  const hour = 3_600_000;
+  const ago = (hours: number) => new Date(now.getTime() - hours * hour);
 
-  it('daily without a previous issue covers the last 24h, incl. the previous evening', () => {
-    const period = issueWindow({ days: 1, now });
+  it('without a previous issue covers the last maxDays×24h', () => {
+    const period = issueWindow({ maxDays: 1, now });
     expect(period.start.toISOString()).toBe('2026-11-14T07:16:00.000Z');
     expect(period.end).toBe(now);
     expect(period.days).toEqual(['2026-11-14', '2026-11-15']);
     expect(formatDateline(period.days)).toBe('14–15 ноября 2026');
+
+    const weekly = issueWindow({ maxDays: 7, now });
+    expect(weekly.start.toISOString()).toBe('2026-11-08T07:16:00.000Z');
+    expect(() => issueWindow({ maxDays: 0, now })).toThrow();
   });
 
-  it('daily starts at the previous ready issue end', () => {
+  it('starts at the previous ready issue end inside the cap', () => {
     const previousEnd = new Date('2026-11-14T18:00:00Z');
-    const period = issueWindow({ days: 1, now, previousEnd });
+    const period = issueWindow({ maxDays: 1, now, previousEnd });
     expect(period.start).toEqual(previousEnd);
     expect(period.days).toEqual(['2026-11-14', '2026-11-15']);
 
-    const sameDay = issueWindow({ days: 1, now, previousEnd: new Date('2026-11-15T03:00:00Z') });
+    const sameDay = issueWindow({ maxDays: 1, now, previousEnd: new Date('2026-11-15T03:00:00Z') });
     expect(sameDay.days).toEqual(['2026-11-15']);
     expect(formatDateline(sameDay.days)).toBe('15 ноября 2026');
+
+    const weekly = issueWindow({ maxDays: 7, now, previousEnd: ago(100) });
+    expect(weekly.start).toEqual(ago(100));
   });
 
-  it('ignores a previous issue older than 7 days or in the future', () => {
-    const old = issueWindow({ days: 1, now, previousEnd: new Date('2026-11-01T00:00:00Z') });
+  it('continues across the 3h grace past the cap, not beyond it', () => {
+    expect(issueWindow({ maxDays: 1, now, previousEnd: ago(26) }).start).toEqual(ago(26));
+    expect(issueWindow({ maxDays: 1, now, previousEnd: ago(27) }).start).toEqual(ago(24));
+    expect(issueWindow({ maxDays: 3, now, previousEnd: ago(74.5) }).start).toEqual(ago(74.5));
+  });
+
+  it('ignores a previous issue beyond the cap or in the future', () => {
+    // The daily carryover used to reach back 7 days; now it is 24h + grace.
+    const old = issueWindow({ maxDays: 1, now, previousEnd: new Date('2026-11-12T00:00:00Z') });
     expect(old.start.toISOString()).toBe('2026-11-14T07:16:00.000Z');
-    const future = issueWindow({ days: 1, now, previousEnd: new Date('2026-11-16T00:00:00Z') });
+    const future = issueWindow({ maxDays: 1, now, previousEnd: new Date('2026-11-16T00:00:00Z') });
     expect(future.start.toISOString()).toBe('2026-11-14T07:16:00.000Z');
-  });
-
-  it('--days N covers the last N×24h regardless of the previous issue', () => {
-    const period = issueWindow({ days: 3, now, previousEnd: new Date('2026-11-15T03:00:00Z') });
-    expect(period.start.toISOString()).toBe('2026-11-12T07:16:00.000Z');
-    expect(period.days).toEqual(['2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15']);
-    expect(() => issueWindow({ days: 0, now })).toThrow();
+    const equal = issueWindow({ maxDays: 1, now, previousEnd: now });
+    expect(equal.start.toISOString()).toBe('2026-11-14T07:16:00.000Z');
   });
 
   it('formats MSK time', () => {

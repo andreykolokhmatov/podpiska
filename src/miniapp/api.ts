@@ -6,14 +6,19 @@ import { EnvError, type MiniAppEnv } from '@/lib/env';
 import { formatDateline, mskDay } from '@/pipeline/day';
 import { safeMessage } from '@/pipeline/errors';
 import { executeIssueRun, newIssueRun, planIssuePeriod, type PipelineDeps } from '@/pipeline/run';
+import { ensureActive, mayActivate, slotAfter, zoneOf } from '@/schedule/service';
+import type { ScheduleStore, ScheduleUser } from '@/schedule/store';
+import { isValidTimeZone } from '@/schedule/time';
 
 import { isOwner, parseAuthHeader, verifyInitData, type MiniAppAuth } from './auth';
 import {
   addChannelRequestSchema,
   DAILY_BUILDS,
   INTERESTS_MAX,
+  FREQUENCIES,
   issuesQuerySchema,
   putInterestsRequestSchema,
+  putScheduleRequestSchema,
   removeChannelRequestSchema,
   type AddChannelResponse,
   type ApiError,
@@ -28,7 +33,10 @@ import {
   type MeResponse,
   type OnboardingResponse,
   type PdfLinkResponse,
+  type Frequency,
   type RemoveChannelResponse,
+  type ScheduleResponse,
+  type ScheduleView,
   type ShareIssueResponse,
 } from './contract';
 import type { PdfLink } from './pdf-link';
@@ -45,6 +53,7 @@ import type { AppStore, AppUser, ReadyIssueRow } from './store';
 
 export interface AppApiDeps {
   store: AppStore;
+  schedules: Pick<ScheduleStore, 'get' | 'update' | 'setTimezone' | 'activate' | 'recentReady'>;
   /** Throws EnvError when the Mini App env is invalid (→ 500 misconfigured). */
   env: () => MiniAppEnv;
   now: () => Date;
@@ -88,6 +97,8 @@ export interface AppApi {
   deleteIssue: IdHandler;
   shareIssue: IdHandler;
   pdfLink: IdHandler;
+  getSchedule: Handler;
+  putSchedule: Handler;
 }
 
 export type IdHandler = (req: Request, id: string) => Promise<Response>;
@@ -168,6 +179,24 @@ const addFailureCode: Record<AddChannelFailure, ApiErrorCode> = {
 
 const uuidSchema = z.uuid();
 
+const asFrequency = (value: number): Frequency =>
+  (FREQUENCIES as readonly number[]).includes(value) ? (value as Frequency) : 1;
+
+export function scheduleView(user: ScheduleUser): ScheduleView {
+  const paused = user.pausedAt !== null;
+  const canNotify = user.canNotifyAt !== null;
+  return {
+    enabled: user.enabled,
+    everyDays: asFrequency(user.everyDays),
+    hour: user.hour,
+    timeZone: zoneOf(user),
+    nextIssueAt: user.nextIssueAt?.toISOString() ?? null,
+    paused,
+    active: user.nextIssueAt !== null && mayActivate(user),
+    canNotify,
+  };
+}
+
 export function createAppApi(deps: AppApiDeps): AppApi {
   interface Session {
     auth: MiniAppAuth;
@@ -191,7 +220,11 @@ export function createAppApi(deps: AppApiDeps): AppApi {
 
   const authenticate = async (req: Request): Promise<Session> => {
     const { auth, env } = verify(req);
-    const user = await deps.store.upsertUser(auth.user);
+    // The dev bot's write permission says nothing about the prod bot that sends notices.
+    const user = await deps.store.upsertUser(
+      auth.user,
+      auth.bot === 'prod' && auth.allowsWriteToPm ? { canNotifyAt: deps.now() } : {},
+    );
     return { auth, user, env, owner: isOwner(auth, env.OWNER_TELEGRAM_ID) };
   };
 
@@ -215,6 +248,14 @@ export function createAppApi(deps: AppApiDeps): AppApi {
   const me = route('me', async (req) => {
     const { user, env, owner } = await authenticate(req);
     const now = deps.now();
+    const schedule = { ...user.schedule };
+    const tz = new URL(req.url).searchParams.get('tz');
+    if (tz !== null && tz !== schedule.timeZone && isValidTimeZone(tz)) {
+      await deps.schedules.setTimezone(user.id, tz);
+      schedule.timeZone = tz;
+    }
+    // Also arms the schedule of users who got their first issue before scheduling existed.
+    schedule.nextIssueAt = await ensureActive(deps.schedules, schedule, now);
     const [channelCount, [latest], inFlight, used] = await Promise.all([
       deps.store.countChannels(user.id),
       deps.store.listReadyIssues(user.id, { limit: 1 }),
@@ -230,6 +271,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       latestIssue: latest === undefined ? null : issueSummary(latest),
       inFlight: inFlight === undefined || isStale(inFlight, now) ? null : issueState(inFlight, now),
       quota: quota(used, owner),
+      schedule: scheduleView(schedule),
     };
     return json(200, body);
   });
@@ -346,10 +388,12 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     // Fails on a bad LLM env before anything is claimed or inserted.
     const pipeline = deps.pipeline();
     const now = deps.now();
-    const period = await planIssuePeriod(pipeline, { userId: user.id, days: 1 });
+    const maxDays = user.schedule.enabled ? user.schedule.everyDays : 1;
+    const period = await planIssuePeriod(pipeline, { userId: user.id, maxDays });
     const claim = await deps.store.claimIssue({
       userId: user.id,
       period,
+      trigger: 'manual',
       since: quotaDayStart(now),
       staleBefore: new Date(now.getTime() - STALE_MS),
       perUserLimit: owner ? null : DAILY_BUILDS,
@@ -387,6 +431,14 @@ export function createAppApi(deps: AppApiDeps): AppApi {
         deps.log(`[app] build ${issueId}: ready №${result.number}`);
       } catch (error) {
         deps.log(`[app] build ${issueId}: failed: ${errorCode(safeMessage(error))}`);
+        return;
+      }
+      try {
+        // A manual build never moves an armed schedule; it only arms one that has no slot yet.
+        const fresh = await deps.schedules.get(user.id);
+        if (fresh !== undefined) await ensureActive(deps.schedules, fresh, deps.now());
+      } catch (error) {
+        deps.log(`[app] build ${issueId}: schedule not armed: ${safeMessage(error)}`);
       }
     });
     deps.log(`[app] build ${issueId}: started`);
@@ -406,6 +458,8 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     if (user === undefined) throw fail(404, 'not_found');
     const row = await deps.store.getIssue(user.id, id);
     if (row === undefined) throw fail(404, 'not_found');
+    // The Mini App asks for its own issue on every open: that is what "read" means for pausing.
+    if (row.status === 'ready') await deps.store.markOpened(user.id, row.id);
     const body: IssueResponse = { issue: issueState(row, deps.now()) };
     return json(200, body);
   });
@@ -450,7 +504,52 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     return json(200, body);
   });
 
+  const getSchedule = route('schedule.get', async (req) => {
+    const { user } = await authenticate(req);
+    const schedule = { ...user.schedule };
+    schedule.nextIssueAt = await ensureActive(deps.schedules, schedule, deps.now());
+    const body: ScheduleResponse = { schedule: scheduleView(schedule) };
+    return json(200, body);
+  });
+
+  const putSchedule = route('schedule.put', async (req) => {
+    const { auth, user } = await authenticate(req);
+    const input = await readBody(req, putScheduleRequestSchema);
+    if (input.timeZone !== undefined && !isValidTimeZone(input.timeZone)) {
+      throw fail(400, 'bad_request');
+    }
+    const now = deps.now();
+    const granted = input.writeAccessGranted === true && auth.bot === 'prod';
+    const next: ScheduleUser = {
+      ...user.schedule,
+      enabled: input.enabled,
+      everyDays: input.everyDays,
+      hour: input.hour,
+      timeZone: input.timeZone ?? user.schedule.timeZone,
+      pausedAt: input.enabled ? null : user.schedule.pausedAt,
+      canNotifyAt: granted ? now : user.schedule.canNotifyAt,
+      nextIssueAt: null,
+    };
+    if (mayActivate(next)) {
+      const [last] = await deps.schedules.recentReady(user.id, 1);
+      if (last !== undefined) next.nextIssueAt = slotAfter(next, last.periodEnd, now);
+    }
+    await deps.schedules.update(user.id, {
+      enabled: next.enabled,
+      everyDays: next.everyDays,
+      hour: next.hour,
+      timeZone: next.timeZone,
+      nextIssueAt: next.nextIssueAt,
+      clearPause: input.enabled,
+      ...(granted ? { canNotifyAt: now } : {}),
+    });
+    const body: ScheduleResponse = { schedule: scheduleView(next) };
+    return json(200, body);
+  });
+
   return {
+    getSchedule,
+    putSchedule,
     me,
     onboarding,
     listChannels,

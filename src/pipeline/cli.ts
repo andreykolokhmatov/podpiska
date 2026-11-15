@@ -82,7 +82,7 @@ async function main(): Promise<number> {
       }),
       {
         userId: user.id,
-        days,
+        maxDays: days,
         interests: user.interests,
         refreshDigests: values['refresh-digests'],
       },

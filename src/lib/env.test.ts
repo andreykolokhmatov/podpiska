@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getCronEnv,
   EnvError,
   getBotEnv,
   getDatabaseUrl,
@@ -271,4 +272,28 @@ describe('getPdfEnv', () => {
     expect(error.message).toContain('APP_URL');
     expect(error.message).not.toContain('secret-host');
   });
+});
+
+describe('getCronEnv', () => {
+  const secret = 'a'.repeat(64);
+  const source = {
+    CRON_SECRET: secret,
+    TELEGRAM_BOT_TOKEN: validSource.TELEGRAM_BOT_TOKEN,
+    APP_URL: validSource.APP_URL,
+  };
+
+  it('needs a long secret, the bot token and APP_URL; the global cap defaults to 30', () => {
+    const env = getCronEnv(source);
+    expect(env.CRON_SECRET).toBe(secret);
+    expect(env.MAX_BUILDS_PER_DAY_GLOBAL).toBe(30);
+  });
+
+  it.each([undefined, '', '   ', 'short-secret'])(
+    'refuses a missing, empty or short secret without echoing it (%s)',
+    (value) => {
+      const error = errorOf(() => getCronEnv({ ...source, CRON_SECRET: value }));
+      expect(error.message).toContain('CRON_SECRET');
+      if (value !== undefined && value.trim() !== '') expect(error.message).not.toContain(value);
+    },
+  );
 });

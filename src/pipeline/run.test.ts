@@ -32,7 +32,7 @@ const setup = (smartAnswer: () => string | Error, collect: PipelineDeps['collect
   return { deps, issues, digests, fast, smart };
 };
 
-const input = { userId: 1, days: 1, interests: null };
+const input = { userId: 1, maxDays: 1, interests: null };
 
 describe('runIssuePipeline', () => {
   it('walks pending → collecting → digesting → composing → ready', async () => {
@@ -236,7 +236,7 @@ describe('runIssuePipeline', () => {
 
 describe('executeIssueRun', () => {
   const claim = async (deps: PipelineDeps, issues: ReturnType<typeof setup>['issues']) => {
-    const period = await planIssuePeriod(deps, { userId: 1, days: 1 });
+    const period = await planIssuePeriod(deps, { userId: 1, maxDays: 1 });
     const record = await issues.create(1, period);
     return newIssueRun(deps, { issueId: record.id, userId: 1, period, interests: null });
   };
@@ -317,11 +317,30 @@ describe('planIssuePeriod', () => {
     const older = await add(6);
     const newer = await add(2);
 
-    expect((await planIssuePeriod(deps, { userId: 1, days: 1 })).start).toEqual(newer.periodEnd);
+    expect((await planIssuePeriod(deps, { userId: 1, maxDays: 1 })).start).toEqual(newer.periodEnd);
     newer.deletedAt = now;
-    expect((await planIssuePeriod(deps, { userId: 1, days: 1 })).start).toEqual(older.periodEnd);
+    expect((await planIssuePeriod(deps, { userId: 1, maxDays: 1 })).start).toEqual(older.periodEnd);
     older.deletedAt = now;
-    const fresh = await planIssuePeriod(deps, { userId: 1, days: 1 });
+    const fresh = await planIssuePeriod(deps, { userId: 1, maxDays: 1 });
     expect(fresh.start).toEqual(new Date(now.getTime() - 24 * hour));
+  });
+
+  it('always continues from the last ready issue, capped at maxDays + grace', async () => {
+    const { deps, issues } = setup(() => '{}');
+    const hour = 3_600_000;
+    const end = new Date(now.getTime() - 100 * hour);
+    const record = await issues.create(1, { start: new Date(end.getTime() - 24 * hour), end });
+    const row = issues.issues.get(record.id);
+    if (row === undefined) throw new Error('no record');
+    row.status = 'ready';
+
+    // 100h ago: within a weekly window, beyond a daily or 3-day one.
+    expect((await planIssuePeriod(deps, { userId: 1, maxDays: 7 })).start).toEqual(end);
+    expect((await planIssuePeriod(deps, { userId: 1, maxDays: 3 })).start).toEqual(
+      new Date(now.getTime() - 72 * hour),
+    );
+    expect((await planIssuePeriod(deps, { userId: 1, maxDays: 1 })).start).toEqual(
+      new Date(now.getTime() - 24 * hour),
+    );
   });
 });

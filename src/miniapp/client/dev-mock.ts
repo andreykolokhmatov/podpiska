@@ -4,11 +4,18 @@
  * builds never include it.
  *
  * Query: mock=1 · theme=light|dark · scenario=onboarding|hub|done|building|fresh
+ *        schedule=active|off|paused|nonotify (hub default: active; fresh: waits for the first issue)
  * Newspaper owner buttons: /issue/<ISSUE_ID>?tma=1&mock=1 (needs a real issue row to render).
  */
 import { emitEvent, mockTelegramEnv } from '@tma.js/sdk-react';
 
-import type { ChannelView, IssueState, IssueSummary, MeResponse } from '@/miniapp/contract';
+import type {
+  ChannelView,
+  IssueState,
+  IssueSummary,
+  MeResponse,
+  ScheduleView,
+} from '@/miniapp/contract';
 
 import type { FetchLike } from './api';
 
@@ -77,7 +84,45 @@ const CHANNELS: ChannelView[] = [
   { username: 'omskzdes', title: 'Омск здесь', avatarUrl: null, available: true },
 ];
 
-function initialMe(scenario: Scenario): MeResponse {
+type ScheduleScenario = 'active' | 'off' | 'paused' | 'nonotify';
+
+/** Next hour:00 Moscow time at least a day ahead, as the server would arm it. */
+function mockNextIssueAt(hour: number, everyDays: number): string {
+  const msk = 3 * 3_600_000;
+  const now = Date.now();
+  const day = Math.floor((now + msk) / 86_400_000) * 86_400_000;
+  let at = day + everyDays * 86_400_000 + hour * 3_600_000 - msk;
+  if (at <= now) at += 86_400_000;
+  return new Date(at).toISOString();
+}
+
+function initialSchedule(scenario: Scenario, kind: ScheduleScenario): ScheduleView {
+  const base: ScheduleView = {
+    enabled: true,
+    everyDays: 1,
+    hour: 8,
+    timeZone: 'Europe/Moscow',
+    nextIssueAt: mockNextIssueAt(8, 1),
+    paused: false,
+    active: true,
+    canNotify: true,
+  };
+  if (scenario === 'onboarding' || scenario === 'fresh') {
+    return { ...base, nextIssueAt: null, active: false };
+  }
+  switch (kind) {
+    case 'off':
+      return { ...base, enabled: false, nextIssueAt: null, active: false };
+    case 'paused':
+      return { ...base, paused: true, nextIssueAt: null, active: false };
+    case 'nonotify':
+      return { ...base, canNotify: false, nextIssueAt: null, active: false };
+    case 'active':
+      return base;
+  }
+}
+
+function initialMe(scenario: Scenario, schedule: ScheduleView): MeResponse {
   const base: MeResponse = {
     user: { telegramId: 1, firstName: 'Андрей', username: 'andrey' },
     onboarded: scenario !== 'onboarding',
@@ -87,6 +132,7 @@ function initialMe(scenario: Scenario): MeResponse {
     latestIssue: ISSUES[0] ?? null,
     inFlight: null,
     quota: { limit: 3, used: 1, remaining: 2 },
+    schedule,
   };
   switch (scenario) {
     case 'onboarding':
@@ -114,8 +160,8 @@ function initialMe(scenario: Scenario): MeResponse {
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-function createBackend(scenario: Scenario): FetchLike {
-  const me = initialMe(scenario);
+function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): FetchLike {
+  const me = initialMe(scenario, initialSchedule(scenario, scheduleKind));
   let channels = scenario === 'onboarding' || scenario === 'fresh' ? [] : [...CHANNELS];
   let interests: string | null = me.hasInterests
     ? 'Коротко про новости Омска, больше про экономику'
@@ -160,6 +206,41 @@ function createBackend(scenario: Scenario): FetchLike {
           channels: { count: channels.length, limit: 20 },
           hasInterests: interests !== null,
         });
+      case 'GET /api/app/schedule':
+        return json(200, { schedule: me.schedule });
+      case 'PUT /api/app/schedule': {
+        const input = (body ?? {}) as Partial<{
+          enabled: boolean;
+          everyDays: ScheduleView['everyDays'];
+          hour: number;
+          timeZone: string;
+          writeAccessGranted: boolean;
+        }>;
+        if (
+          typeof input.enabled !== 'boolean' ||
+          ![1, 3, 7].includes(input.everyDays ?? 0) ||
+          typeof input.hour !== 'number' ||
+          input.hour < 0 ||
+          input.hour > 23
+        ) {
+          return json(400, { error: 'bad_request' });
+        }
+        const prev = me.schedule;
+        const canNotify = prev.canNotify || input.writeAccessGranted === true;
+        const everyDays = input.everyDays ?? prev.everyDays;
+        const armed = input.enabled && canNotify && issues.length > 0;
+        me.schedule = {
+          enabled: input.enabled,
+          everyDays,
+          hour: input.hour,
+          timeZone: input.timeZone ?? prev.timeZone,
+          nextIssueAt: armed ? mockNextIssueAt(input.hour, everyDays) : null,
+          paused: input.enabled ? false : prev.paused,
+          active: armed,
+          canNotify,
+        };
+        return json(200, { schedule: me.schedule });
+      }
       case 'POST /api/app/onboarding':
         me.onboarded = true;
         return json(200, { onboardedAt: new Date().toISOString() });
@@ -314,6 +395,11 @@ export function installDevMock(search: string): FetchLike {
     scenarioParam === 'fresh'
       ? scenarioParam
       : 'hub';
+  const scheduleParam = query.get('schedule');
+  const scheduleKind: ScheduleScenario =
+    scheduleParam === 'off' || scheduleParam === 'paused' || scheduleParam === 'nonotify'
+      ? scheduleParam
+      : 'active';
   const chrome = nativeChrome(theme);
   const user = {
     id: 1,
@@ -376,6 +462,13 @@ export function installDevMock(search: string): FetchLike {
         case 'web_app_setup_back_button':
           chrome.back(params);
           return;
+        case 'web_app_request_write_access':
+          emitEvent('write_access_requested', {
+            status: window.confirm('Разрешить боту писать вам? (dev mock)')
+              ? 'allowed'
+              : 'cancelled',
+          });
+          return;
         case 'web_app_open_popup':
           emitEvent(
             'popup_closed',
@@ -387,5 +480,5 @@ export function installDevMock(search: string): FetchLike {
       }
     },
   });
-  return createBackend(scenario);
+  return createBackend(scenario, scheduleKind);
 }

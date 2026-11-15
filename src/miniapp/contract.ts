@@ -12,6 +12,11 @@ export const CHANNEL_INPUT_MAX = 200;
 /** "Build now" presses per Moscow day per user (the owner has none). */
 export const DAILY_BUILDS = 3;
 export const ARCHIVE_PAGE_MAX = 50;
+/** Schedule frequencies: every day, every 3 days, every week. */
+export const FREQUENCIES = [1, 3, 7] as const;
+export type Frequency = (typeof FREQUENCIES)[number];
+/** Max length of an IANA time zone name accepted by the API. */
+export const TIME_ZONE_MAX = 64;
 
 export const issueStatuses = [
   'pending',
@@ -72,6 +77,9 @@ export type ApiErrorCode = (typeof apiErrorCodes)[number];
 
 const isoDate = z.iso.datetime({ offset: true });
 
+export const frequencySchema = z.literal(FREQUENCIES);
+export const scheduleHourSchema = z.number().int().min(0).max(23);
+
 export const quotaSchema = z.object({
   limit: z.number().int(),
   used: z.number().int(),
@@ -131,7 +139,31 @@ export const channelViewSchema = z.object({
 });
 export type ChannelView = z.infer<typeof channelViewSchema>;
 
-// GET /api/app/me — upserts the user from initData; everything the hub needs in one call.
+export const scheduleViewSchema = z.object({
+  /** The «Собирать автоматически» switch. */
+  enabled: z.boolean(),
+  everyDays: frequencySchema,
+  /** Local hour 0..23 in timeZone; minutes are always :00. */
+  hour: scheduleHourSchema,
+  /** IANA zone the hour is in (Europe/Moscow until the client reports one). */
+  timeZone: z.string(),
+  /** Next automatic build; null while not active. Format in timeZone. */
+  nextIssueAt: isoDate.nullable(),
+  /**
+   * Stopped by the server: 3 auto issues in a row unread, or the bot could not reach the user
+   * (then canNotify is false too). Saving with enabled=true resumes it.
+   */
+  paused: z.boolean(),
+  /** Armed: enabled, not paused, canNotify and a slot set (needs at least one ready issue). */
+  active: z.boolean(),
+  /** The prod bot may message the user; false → requestWriteAccess before enabling. */
+  canNotify: z.boolean(),
+});
+export type ScheduleView = z.infer<typeof scheduleViewSchema>;
+
+// GET /api/app/me[?tz=<IANA zone>] — upserts the user from initData; everything the hub needs
+// in one call. A valid tz (Intl.DateTimeFormat().resolvedOptions().timeZone) is stored; an
+// invalid one is ignored.
 export const meResponseSchema = z.object({
   user: z.object({
     telegramId: z.number().int(),
@@ -149,6 +181,7 @@ export const meResponseSchema = z.object({
   inFlight: issueStateSchema.nullable(),
   /** null for the owner (hide «Осталось N из 3»). */
   quota: quotaSchema.nullable(),
+  schedule: scheduleViewSchema,
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
 
@@ -236,3 +269,23 @@ export const pdfLinkResponseSchema = z.object({
   fileName: z.string().min(1),
 });
 export type PdfLinkResponse = z.infer<typeof pdfLinkResponseSchema>;
+
+// GET /api/app/schedule — the same view as me.schedule.
+// PUT /api/app/schedule — replaces the settings; 400 bad_request on a bad body (everyDays not in
+// FREQUENCIES, hour outside 0..23, unknown time zone). enabled=true clears a pause and re-arms
+// from the last ready issue (no issue yet → armed after the first one); enabled=false disarms.
+export const scheduleResponseSchema = z.object({ schedule: scheduleViewSchema });
+export type ScheduleResponse = z.infer<typeof scheduleResponseSchema>;
+export const putScheduleRequestSchema = z.object({
+  enabled: z.boolean(),
+  everyDays: frequencySchema,
+  hour: scheduleHourSchema,
+  /** Omitted → keep the stored zone. */
+  timeZone: z.string().min(1).max(TIME_ZONE_MAX).optional(),
+  /**
+   * true right after requestWriteAccess() resolved with status 'allowed' in this session;
+   * counted only for initData signed by the prod bot.
+   */
+  writeAccessGranted: z.boolean().optional(),
+});
+export type PutScheduleRequest = z.infer<typeof putScheduleRequestSchema>;

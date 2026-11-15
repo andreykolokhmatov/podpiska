@@ -50,6 +50,13 @@
       "when": 1794761000011,
       "tag": "0006_issues_deleted_at",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794764581610,
+      "tag": "0007_schedule",
+      "breakpoints": true
     }
   ]
 }

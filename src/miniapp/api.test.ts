@@ -3,9 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AddChannelError, type AddChannelResult, type UserChannelView } from '@/channels';
 import { EnvError, type MiniAppEnv } from '@/lib/env';
-import { seedStores } from '@/pipeline/__fixtures__/compose-fixtures';
+import { seedStores, validDraft } from '@/pipeline/__fixtures__/compose-fixtures';
 import { mockStage } from '@/pipeline/__fixtures__/fakes';
 import type { PipelineDeps } from '@/pipeline/run';
+import type { RecentIssue, ScheduleStore, ScheduleUser } from '@/schedule/store';
 
 import { cleanInterests, createAppApi, type AppApiDeps, type ShareRequest } from './api';
 import {
@@ -19,6 +20,7 @@ import {
   issuesResponseSchema,
   meResponseSchema,
   pdfLinkResponseSchema,
+  scheduleResponseSchema,
   shareIssueResponseSchema,
 } from './contract';
 import { countsTowardQuota, isInFlight, type IssueStateRow } from './status';
@@ -50,6 +52,9 @@ interface IssueRow extends IssueStateRow {
   userId: number;
   contentJson: unknown;
   deletedAt: Date | null;
+  trigger: 'manual' | 'scheduled';
+  periodEnd: Date;
+  openedAt: Date | null;
 }
 
 class FakeAppStore implements AppStore {
@@ -58,21 +63,44 @@ class FakeAppStore implements AppStore {
   issues: IssueRow[] = [];
   claims: ClaimInput[] = [];
   getIssueCalls = 0;
+  opened: string[] = [];
   private seq = 0;
 
-  async upsertUser(user: { id: number; firstName: string; username: string | null }) {
-    const existing = [...this.users.values()].find((u) => u.telegramId === user.id);
-    if (existing) return existing;
-    const created: AppUser = {
-      id: this.users.size + 1,
-      telegramId: user.id,
-      firstName: user.firstName,
-      username: user.username,
-      onboardedAt: null,
-      interests: null,
-    };
-    this.users.set(created.id, created);
-    return created;
+  async upsertUser(
+    user: { id: number; firstName: string; username: string | null },
+    options: { canNotifyAt?: Date } = {},
+  ) {
+    let found = [...this.users.values()].find((u) => u.telegramId === user.id);
+    if (found === undefined) {
+      const id = this.users.size + 1;
+      found = {
+        id,
+        telegramId: user.id,
+        firstName: user.firstName,
+        username: user.username,
+        onboardedAt: null,
+        interests: null,
+        schedule: {
+          id,
+          interests: null,
+          enabled: true,
+          everyDays: 1,
+          hour: 8,
+          timeZone: null,
+          nextIssueAt: null,
+          pausedAt: null,
+          canNotifyAt: null,
+        },
+      };
+      this.users.set(id, found);
+    }
+    if (options.canNotifyAt !== undefined) found.schedule.canNotifyAt = options.canNotifyAt;
+    return { ...found, schedule: { ...found.schedule } };
+  }
+  async markOpened(userId: number, id: string) {
+    this.opened.push(id);
+    const row = this.issues.find((i) => i.id === id && i.userId === userId);
+    if (row?.status === 'ready' && row.deletedAt === null) row.openedAt ??= now;
   }
   async findUser(telegramId: number) {
     return [...this.users.values()].find((u) => u.telegramId === telegramId);
@@ -141,7 +169,11 @@ class FakeAppStore implements AppStore {
   }
   async countBuilds(userId: number, since: Date) {
     return this.issues.filter(
-      (i) => i.userId === userId && i.createdAt >= since && countsTowardQuota(i),
+      (i) =>
+        i.userId === userId &&
+        i.trigger === 'manual' &&
+        i.createdAt >= since &&
+        countsTowardQuota(i),
     ).length;
   }
   async claimIssue(input: ClaimInput): Promise<ClaimResult> {
@@ -154,7 +186,7 @@ class FakeAppStore implements AppStore {
     const global = this.issues.filter((i) => i.createdAt >= input.since && countsTowardQuota(i));
     if (global.length >= input.globalLimit) return { kind: 'limit_global' };
     if ((await this.countChannels(input.userId)) === 0) return { kind: 'no_channels' };
-    const issue = this.add(input.userId, { status: 'pending' });
+    const issue = this.add(input.userId, { status: 'pending', trigger: input.trigger });
     return { kind: 'started', issue, used: input.perUserLimit === null ? 0 : used + 1 };
   }
   add(userId: number, patch: Partial<IssueRow> = {}): IssueRow {
@@ -170,10 +202,61 @@ class FakeAppStore implements AppStore {
       createdAt: now,
       contentJson: null,
       deletedAt: null,
+      trigger: 'manual',
+      periodEnd: now,
+      openedAt: null,
       ...patch,
     };
     this.issues.push(row);
     return row;
+  }
+}
+
+/** Schedule store over the fake app store's users and issues. */
+class FakeScheduleStore implements Pick<
+  ScheduleStore,
+  'get' | 'update' | 'setTimezone' | 'activate' | 'recentReady'
+> {
+  updates: Parameters<ScheduleStore['update']>[] = [];
+  constructor(private readonly app: FakeAppStore) {}
+  private user(userId: number): ScheduleUser {
+    const user = this.app.users.get(userId);
+    if (user === undefined) throw new Error(`no user ${userId}`);
+    return user.schedule;
+  }
+  async get(userId: number) {
+    const user = this.app.users.get(userId);
+    return user === undefined ? undefined : { ...user.schedule };
+  }
+  async update(userId: number, patch: Parameters<ScheduleStore['update']>[1]) {
+    this.updates.push([userId, patch]);
+    const user = this.user(userId);
+    Object.assign(user, {
+      enabled: patch.enabled,
+      everyDays: patch.everyDays,
+      hour: patch.hour,
+      timeZone: patch.timeZone,
+      nextIssueAt: patch.nextIssueAt,
+    });
+    if (patch.clearPause) user.pausedAt = null;
+    if (patch.canNotifyAt !== undefined) user.canNotifyAt = patch.canNotifyAt;
+  }
+  async setTimezone(userId: number, timeZone: string) {
+    this.user(userId).timeZone = timeZone;
+  }
+  async activate(userId: number, next: Date) {
+    const user = this.user(userId);
+    if (user.nextIssueAt !== null || !user.enabled || user.pausedAt !== null) return false;
+    if (user.canNotifyAt === null) return false;
+    user.nextIssueAt = next;
+    return true;
+  }
+  async recentReady(userId: number, limit: number): Promise<RecentIssue[]> {
+    return this.app.issues
+      .filter((i) => i.userId === userId && i.status === 'ready' && i.deletedAt === null)
+      .sort((a, b) => b.periodEnd.getTime() - a.periodEnd.getTime())
+      .slice(0, limit)
+      .map((i) => ({ trigger: i.trigger, openedAt: i.openedAt, periodEnd: i.periodEnd }));
   }
 }
 
@@ -193,6 +276,7 @@ const setup = (
   } = {},
 ) => {
   const store = new FakeAppStore();
+  const schedules = new FakeScheduleStore(store);
   const { digests, issues } = seedStores();
   const pipelineDeps: PipelineDeps = {
     issues,
@@ -229,6 +313,7 @@ const setup = (
   };
   const api = createAppApi({
     store,
+    schedules,
     env: () => env,
     now: () => now,
     addChannel,
@@ -238,7 +323,18 @@ const setup = (
     pdfLink,
     log: (line) => lines.push(line),
   });
-  return { api, store, tasks, lines, addChannel, pipeline, share, pdfLink };
+  return {
+    api,
+    store,
+    schedules,
+    tasks,
+    lines,
+    addChannel,
+    pipeline,
+    share,
+    pdfLink,
+    pipelineDeps,
+  };
 };
 
 const req = (
@@ -274,6 +370,10 @@ describe('auth on every route', () => {
     api.deleteIssue(req('DELETE', `/api/app/issues/${UUID(1)}`, { auth }), UUID(1)),
     api.shareIssue(req('POST', `/api/app/issues/${UUID(1)}/share`, { auth }), UUID(1)),
     api.pdfLink(req('POST', `/api/app/issues/${UUID(1)}/pdf-link`, { auth }), UUID(1)),
+    api.getSchedule(req('GET', '/api/app/schedule', { auth })),
+    api.putSchedule(
+      req('PUT', '/api/app/schedule', { auth, body: { enabled: true, everyDays: 1, hour: 8 } }),
+    ),
   ];
 
   it.each([
@@ -303,6 +403,7 @@ describe('auth on every route', () => {
     const store = new FakeAppStore();
     const api = createAppApi({
       store,
+      schedules: new FakeScheduleStore(store),
       env: () => {
         throw new EnvError('Invalid environment variables:\n  - TELEGRAM_BOT_TOKEN: is required');
       },
@@ -350,6 +451,16 @@ describe('me and onboarding', () => {
       latestIssue: null,
       inFlight: null,
       quota: { limit: 3, used: 0, remaining: 3 },
+      schedule: {
+        enabled: true,
+        everyDays: 1,
+        hour: 8,
+        timeZone: 'Europe/Moscow',
+        nextIssueAt: null,
+        paused: false,
+        active: false,
+        canNotify: true,
+      },
     });
   });
 
@@ -881,5 +992,248 @@ describe('pdf link', () => {
     const res = await ctx.api.pdfLink(req('POST', '/'), issue.id);
     expect(res.status).toBe(500);
     expect(await errorOf(res)).toBe('misconfigured');
+  });
+});
+
+describe('schedule', () => {
+  const HOUR = 3_600_000;
+  const meOf = async (api: ReturnType<typeof setup>['api'], path = '/api/app/me', auth?: string) =>
+    meResponseSchema.parse(
+      await (await api.me(req('GET', path, auth === undefined ? {} : { auth }))).json(),
+    );
+  const put = (api: ReturnType<typeof setup>['api'], body: unknown, auth?: string) =>
+    api.putSchedule(
+      req('PUT', '/api/app/schedule', { body, ...(auth === undefined ? {} : { auth }) }),
+    );
+
+  it('sets can_notify only for prod-signed initData that allows writing', async () => {
+    const cases: [string, boolean][] = [
+      [`tma ${initData({ id: 1 })}`, true],
+      [`tma ${initData({ id: 2, write: false })}`, false],
+      [`tma ${initData({ id: 3, token: DEV })}`, false],
+    ];
+    const { api, store } = setup();
+    for (const [auth, expected] of cases) {
+      const body = await meOf(api, '/api/app/me', auth);
+      expect(body.schedule.canNotify).toBe(expected);
+    }
+    expect([...store.users.values()].map((u) => u.schedule.canNotifyAt !== null)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('stores a valid ?tz and silently ignores an invalid one', async () => {
+    const { api, store } = setup();
+    expect((await meOf(api, '/api/app/me?tz=Asia%2FKolkata')).schedule.timeZone).toBe(
+      'Asia/Kolkata',
+    );
+    expect(store.users.get(1)?.schedule.timeZone).toBe('Asia/Kolkata');
+    const res = await api.me(req('GET', '/api/app/me?tz=Mars%2FOlympus'));
+    expect(res.status).toBe(200);
+    expect(store.users.get(1)?.schedule.timeZone).toBe('Asia/Kolkata');
+    await api.me(req('GET', `/api/app/me?tz=${'x'.repeat(100)}`));
+    expect(store.users.get(1)?.schedule.timeZone).toBe('Asia/Kolkata');
+  });
+
+  it('me arms the schedule only after a ready issue (no backfill needed)', async () => {
+    const { api, store } = setup();
+    const first = await meOf(api);
+    expect(first.schedule).toMatchObject({ active: false, nextIssueAt: null });
+
+    // 10:00 MSK on the 15th; daily at 08:00 MSK → the 16th 05:00Z.
+    store.add(1, { status: 'ready', number: 1, periodEnd: new Date('2026-11-15T07:00:00Z') });
+    const armed = await meOf(api);
+    expect(armed.schedule).toMatchObject({
+      active: true,
+      nextIssueAt: '2026-11-16T05:00:00.000Z',
+    });
+  });
+
+  it('does not arm without permission to notify', async () => {
+    const { api, store } = setup();
+    const auth = `tma ${initData({ write: false })}`;
+    await meOf(api, '/api/app/me', auth);
+    store.add(1, { status: 'ready', number: 1 });
+    const body = await meOf(api, '/api/app/me', auth);
+    expect(body.schedule).toMatchObject({ active: false, canNotify: false, nextIssueAt: null });
+  });
+
+  it('validates PUT and answers the view', async () => {
+    const { api, schedules } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    for (const body of [
+      { enabled: true, everyDays: 2, hour: 8 },
+      { enabled: true, everyDays: 1, hour: 24 },
+      { enabled: true, everyDays: 1, hour: -1 },
+      { enabled: true, everyDays: 1, hour: 8.5 },
+      { enabled: 'yes', everyDays: 1, hour: 8 },
+      { enabled: true, everyDays: 1, hour: 8, timeZone: 'Mars/Olympus' },
+      { enabled: true, everyDays: 1, hour: 8, timeZone: 'x'.repeat(65) },
+    ]) {
+      const res = await put(api, body);
+      expect(res.status).toBe(400);
+      expect(await errorOf(res)).toBe('bad_request');
+    }
+    expect(schedules.updates).toHaveLength(0);
+
+    const res = await put(api, {
+      enabled: true,
+      everyDays: 7,
+      hour: 21,
+      timeZone: 'Europe/Berlin',
+    });
+    expect(res.status).toBe(200);
+    const { schedule } = scheduleResponseSchema.parse(await res.json());
+    expect(schedule).toEqual({
+      enabled: true,
+      everyDays: 7,
+      hour: 21,
+      timeZone: 'Europe/Berlin',
+      nextIssueAt: null,
+      paused: false,
+      active: false,
+      canNotify: true,
+    });
+    const got = scheduleResponseSchema.parse(
+      await (await api.getSchedule(req('GET', '/api/app/schedule'))).json(),
+    );
+    expect(got.schedule).toEqual(schedule);
+  });
+
+  it('enable clears a pause and re-arms from the last issue; disable disarms', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    store.add(1, { status: 'ready', number: 1, periodEnd: new Date('2026-11-15T07:00:00Z') });
+    const user = store.users.get(1)!;
+    user.schedule.pausedAt = new Date('2026-11-14T00:00:00Z');
+
+    const off = scheduleResponseSchema.parse(
+      await (await put(api, { enabled: false, everyDays: 1, hour: 8 })).json(),
+    );
+    expect(off.schedule).toMatchObject({ enabled: false, active: false, nextIssueAt: null });
+    expect(user.schedule.pausedAt).not.toBeNull();
+
+    const on = scheduleResponseSchema.parse(
+      await (await put(api, { enabled: true, everyDays: 3, hour: 9 })).json(),
+    );
+    // Base date 15th (MSK) + 3 days at 09:00 MSK.
+    expect(on.schedule).toMatchObject({
+      enabled: true,
+      paused: false,
+      active: true,
+      nextIssueAt: '2026-11-18T06:00:00.000Z',
+    });
+    expect(user.schedule.pausedAt).toBeNull();
+    expect(user.schedule.nextIssueAt?.toISOString()).toBe('2026-11-18T06:00:00.000Z');
+  });
+
+  it('counts a write-access grant only from the prod bot', async () => {
+    const devAuth = `tma ${initData({ write: false, token: DEV })}`;
+    const prodAuth = `tma ${initData({ write: false })}`;
+    const body = { enabled: true, everyDays: 1, hour: 8, writeAccessGranted: true };
+
+    const dev = setup();
+    await dev.api.me(req('GET', '/', { auth: devAuth }));
+    const viaDev = scheduleResponseSchema.parse(await (await put(dev.api, body, devAuth)).json());
+    expect(viaDev.schedule.canNotify).toBe(false);
+
+    const prod = setup();
+    await prod.api.me(req('GET', '/', { auth: prodAuth }));
+    prod.store.add(1, { status: 'ready', number: 1 });
+    const viaProd = scheduleResponseSchema.parse(
+      await (await put(prod.api, body, prodAuth)).json(),
+    );
+    expect(viaProd.schedule).toMatchObject({ canNotify: true, active: true });
+    expect(prod.schedules.updates.at(-1)?.[1].canNotifyAt).toEqual(now);
+  });
+
+  it('a manual build uses the manual trigger and the schedule window', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    store.channels.set(1, [channel('econnews')]);
+    store.users.get(1)!.schedule.everyDays = 7;
+    await api.buildIssue(req('POST', '/api/app/issues'));
+    expect(store.claims[0]?.trigger).toBe('manual');
+    expect(store.claims[0]?.period.start).toEqual(new Date(now.getTime() - 7 * 24 * HOUR));
+
+    store.issues.at(-1)!.status = 'failed';
+    store.users.get(1)!.schedule.enabled = false;
+    await api.buildIssue(req('POST', '/api/app/issues'));
+    expect(store.claims[1]?.period.start).toEqual(new Date(now.getTime() - 24 * HOUR));
+  });
+
+  it('scheduled builds do not use up the manual quota', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    for (let i = 0; i < 3; i += 1) store.add(1, { status: 'ready', trigger: 'scheduled' });
+    expect((await meOf(api)).quota).toEqual({ limit: 3, used: 0, remaining: 3 });
+  });
+
+  it('arms the schedule only after the build is ready', async () => {
+    const { digests, issues } = seedStores();
+    const pipelineDeps: PipelineDeps = {
+      issues,
+      digests,
+      collect: async (names) =>
+        names.map((username) => ({ username, ok: true, collected: 1, inserted: 0 })),
+      llm: {
+        fast: mockStage('fast', () => JSON.stringify({ items: [] })).stage,
+        smart: mockStage('smart', () => JSON.stringify(validDraft())).stage,
+      },
+      now: () => now,
+    };
+    const ok = setup({ pipeline: () => pipelineDeps });
+    await ok.api.me(req('GET', '/api/app/me'));
+    ok.store.channels.set(1, [channel('econnews')]);
+    const started = buildResponseSchema.parse(
+      await (await ok.api.buildIssue(req('POST', '/api/app/issues'))).json(),
+    );
+    const id = started.issue.id;
+    const row = ok.store.issues.find((i) => i.id === id)!;
+    issues.issues.set(id, {
+      id,
+      userId: 1,
+      status: 'pending',
+      periodStart: new Date(now.getTime() - 24 * HOUR),
+      periodEnd: now,
+      number: null,
+      error: null,
+      content: null,
+      history: ['pending'],
+    });
+    // The app store mirrors the pipeline: the row is ready by the time the schedule is armed.
+    row.status = 'ready';
+    row.number = 1;
+    expect(ok.store.users.get(1)!.schedule.nextIssueAt).toBeNull();
+    await ok.tasks[0]?.();
+    expect(issues.issues.get(id)?.status).toBe('ready');
+    expect(ok.store.users.get(1)!.schedule.nextIssueAt?.toISOString()).toBe(
+      '2026-11-16T05:00:00.000Z',
+    );
+
+    // A failed build never arms, even with an older ready issue around.
+    const failed = setup();
+    await failed.api.me(req('GET', '/api/app/me'));
+    failed.store.channels.set(1, [channel('econnews')]);
+    await failed.api.buildIssue(req('POST', '/api/app/issues'));
+    failed.store.add(1, { status: 'ready', number: 1 });
+    await failed.tasks[0]?.();
+    expect(failed.store.users.get(1)!.schedule.nextIssueAt).toBeNull();
+  });
+
+  it('marks opened only the own ready issue', async () => {
+    const { api, store } = setup();
+    await api.me(req('GET', '/api/app/me'));
+    const ready = store.add(1, { status: 'ready', number: 1, trigger: 'scheduled' });
+    const building = store.add(1, { status: 'digesting' });
+    const foreign = store.add(7, { status: 'ready', number: 1 });
+    await api.getIssue(req('GET', '/'), building.id);
+    await api.getIssue(req('GET', '/'), foreign.id);
+    expect(store.opened).toEqual([]);
+    await api.getIssue(req('GET', '/'), ready.id);
+    expect(store.opened).toEqual([ready.id]);
+    expect(ready.openedAt).toEqual(now);
   });
 });

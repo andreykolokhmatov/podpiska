@@ -11,6 +11,7 @@ import {
 import { useEffect } from 'react';
 
 import { apiFetch, type ApiResult } from '../api';
+import { clientTimeZone } from '../schedule';
 import { useApi } from '../useApi';
 import { Hub } from './Hub';
 import { LoadError, Loading } from './LoadState';
@@ -24,8 +25,10 @@ export interface HomeData {
 
 // The hub shows channels and interests inline; the contract keeps them on their own endpoints.
 async function loadHome(): Promise<ApiResult<HomeData>> {
+  const timeZone = clientTimeZone();
+  const mePath = timeZone ? `/api/app/me?tz=${encodeURIComponent(timeZone)}` : '/api/app/me';
   const [me, channels, interests] = await Promise.all([
-    apiFetch('/api/app/me', meResponseSchema),
+    apiFetch(mePath, meResponseSchema),
     apiFetch('/api/app/channels', channelsResponseSchema),
     apiFetch('/api/app/interests', interestsResponseSchema),
   ]);

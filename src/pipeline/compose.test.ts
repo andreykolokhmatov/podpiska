@@ -9,7 +9,7 @@ import { NoNewsError } from './errors';
 const input = {
   userId: 1,
   channels,
-  period: issueWindow({ days: 1, now }),
+  period: issueWindow({ maxDays: 1, now }),
   interests: 'больше про экономику',
 };
 
@@ -79,7 +79,7 @@ describe('composeIssue', () => {
   it('offers only items with a post inside the window', async () => {
     const { digests, issues } = seedStores();
     // Post 102 is from 07:00Z on the 15th: outside a window that starts at 10:00Z.
-    const period = issueWindow({ days: 1, now, previousEnd: new Date('2026-11-15T10:00:00Z') });
+    const period = issueWindow({ maxDays: 1, now, previousEnd: new Date('2026-11-15T10:00:00Z') });
     issues.postsMeta = issues.postsMeta.map((meta) =>
       meta.id === 102 ? meta : { ...meta, publishedAt: new Date('2026-11-15T12:00:00Z') },
     );

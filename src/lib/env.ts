@@ -89,6 +89,7 @@ const boundedInt = (min: number, max: number, fallback: number) => {
 };
 
 const maxChannelsPerUser = boundedInt(1, 1000, 50);
+const maxBuildsPerDayGlobal = boundedInt(1, 100_000, 30);
 
 // Telegram webhooks and Mini Apps require https, so http is rejected even for dev.
 const botShape = {
@@ -205,7 +206,7 @@ const miniAppShape = {
       .optional(),
   ),
   MAX_CHANNELS_PER_USER: maxChannelsPerUser,
-  MAX_BUILDS_PER_DAY_GLOBAL: boundedInt(1, 100_000, 30),
+  MAX_BUILDS_PER_DAY_GLOBAL: maxBuildsPerDayGlobal,
 };
 
 const miniAppEnvSchema = z.object(miniAppShape);
@@ -256,6 +257,27 @@ export type PdfEnv = z.infer<typeof pdfEnvSchema>;
 /** Validates only what PDF links and the PDF route need. */
 export function getPdfEnv(source: EnvSource = process.env): PdfEnv {
   const result = pdfEnvSchema.safeParse(source);
+  if (!result.success) {
+    throw new EnvError(formatIssues(result.error));
+  }
+  return result.data;
+}
+
+const cronEnvSchema = z.object({
+  // Bearer secret of /api/cron/*; never optional, so the endpoints can never be open.
+  CRON_SECRET: requiredString('is required').pipe(
+    z.string().min(32, 'must be at least 32 chars (openssl rand -hex 32)'),
+  ),
+  APP_URL: botShape.APP_URL,
+  TELEGRAM_BOT_TOKEN: telegramBotToken,
+  MAX_BUILDS_PER_DAY_GLOBAL: maxBuildsPerDayGlobal,
+});
+
+export type CronEnv = z.infer<typeof cronEnvSchema>;
+
+/** Validates what the scheduled-issue cron routes need (the LLM env is checked separately). */
+export function getCronEnv(source: EnvSource = process.env): CronEnv {
+  const result = cronEnvSchema.safeParse(source);
   if (!result.success) {
     throw new EnvError(formatIssues(result.error));
   }

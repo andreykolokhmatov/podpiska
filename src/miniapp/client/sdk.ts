@@ -9,6 +9,7 @@ import {
   openLink,
   openTelegramLink,
   popup,
+  requestWriteAccess,
   retrieveLaunchParams,
   retrieveRawInitData,
   postEvent,
@@ -132,6 +133,16 @@ export function openPostLink(url: string): void {
     openLink(url);
   } else {
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/** Asks Telegram to let the bot message the user; true only for an explicit «allowed». */
+export async function askWriteAccess(): Promise<boolean> {
+  if (!requestWriteAccess.isAvailable()) return false;
+  try {
+    return (await requestWriteAccess()) === 'allowed';
+  } catch {
+    return false;
   }
 }
 

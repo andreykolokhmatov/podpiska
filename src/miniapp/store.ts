@@ -2,8 +2,9 @@ import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from '
 
 import { listUserChannels, removeUserChannel, type UserChannelView } from '@/channels';
 import type { Database } from '@/db';
-import { issues, userChannels, users } from '@/db/schema';
+import { issues, userChannels, users, type IssueTrigger } from '@/db/schema';
 import type { TimeRange } from '@/pipeline/store';
+import type { ScheduleUser } from '@/schedule/store';
 
 import type { MiniAppUser } from './auth';
 import { QUOTA_EXEMPT_CODES, type IssueStateRow } from './status';
@@ -15,6 +16,7 @@ export interface AppUser {
   username: string | null;
   onboardedAt: Date | null;
   interests: string | null;
+  schedule: ScheduleUser;
 }
 
 export interface ReadyIssueRow {
@@ -27,6 +29,8 @@ export interface ReadyIssueRow {
 export interface ClaimInput {
   userId: number;
   period: TimeRange;
+  /** Only manual builds count toward perUserLimit; both count toward globalLimit. */
+  trigger: IssueTrigger;
   /** Start of the quota day (00:00 MSK). */
   since: Date;
   /** In-flight issues created before this are reaped as failed('timeout'). */
@@ -47,8 +51,11 @@ export type ClaimResult =
   | { kind: 'no_channels' };
 
 export interface AppStore {
-  /** Creates or refreshes the user from initData (does not touch bot_blocked_at). */
-  upsertUser(user: MiniAppUser): Promise<AppUser>;
+  /**
+   * Creates or refreshes the user from initData (does not touch bot_blocked_at); canNotifyAt
+   * records that the prod bot may write to them.
+   */
+  upsertUser(user: MiniAppUser, options?: { canNotifyAt?: Date }): Promise<AppUser>;
   /** Read-only lookup: a reader of a shared issue must not become a user. */
   findUser(telegramId: number): Promise<AppUser | undefined>;
   /** Sets onboarded_at once; returns the stored value. */
@@ -73,8 +80,10 @@ export interface AppStore {
    * busy = still being built; not_found = no such issue of this user, or a failed one.
    */
   softDeleteIssue(userId: number, id: string): Promise<SoftDeleteResult>;
-  /** Builds since `since` that count toward the quota (exempt failures excluded). */
+  /** Manual builds since `since` that count toward the quota (exempt failures excluded). */
   countBuilds(userId: number, since: Date): Promise<number>;
+  /** Sets opened_at once on the user's own ready issue. */
+  markOpened(userId: number, id: string): Promise<void>;
   claimIssue(input: ClaimInput): Promise<ClaimResult>;
 }
 
@@ -85,7 +94,48 @@ const userColumns = {
   username: users.username,
   onboardedAt: users.onboardedAt,
   interests: users.interestsPrompt,
+  enabled: users.scheduleEnabled,
+  everyDays: users.scheduleEveryDays,
+  hour: users.scheduleHour,
+  timeZone: users.timezone,
+  nextIssueAt: users.nextIssueAt,
+  pausedAt: users.schedulePausedAt,
+  canNotifyAt: users.canNotifyAt,
 };
+
+const toAppUser = (row: {
+  id: number;
+  telegramId: number;
+  firstName: string | null;
+  username: string | null;
+  onboardedAt: Date | null;
+  interests: string | null;
+  enabled: boolean;
+  everyDays: number;
+  hour: number;
+  timeZone: string | null;
+  nextIssueAt: Date | null;
+  pausedAt: Date | null;
+  canNotifyAt: Date | null;
+}): AppUser => ({
+  id: row.id,
+  telegramId: row.telegramId,
+  firstName: row.firstName,
+  username: row.username,
+  onboardedAt: row.onboardedAt,
+  interests: row.interests,
+  schedule: {
+    id: row.id,
+    interests: row.interests,
+    enabled: row.enabled,
+    everyDays: row.everyDays,
+    hour: row.hour,
+    timeZone: row.timeZone,
+    nextIssueAt: row.nextIssueAt,
+    pausedAt: row.pausedAt,
+    canNotifyAt: row.canNotifyAt,
+  },
+});
 
 const stateColumns = {
   id: issues.id,
@@ -100,6 +150,9 @@ const stateColumns = {
 
 const IN_FLIGHT = ['pending', 'collecting', 'digesting', 'composing'] as const;
 
+// Scheduled builds never use up the user's "build now" presses.
+const manualOnly = sql`${issues.trigger} = 'manual'`;
+
 // Mirrors countsTowardQuota(): failures that spent no LLM money are free.
 const countsTowardQuota = sql`not (${issues.status} = 'failed' and split_part(coalesce(${issues.error}, ''), ':', 1) in (${sql.join(
   QUOTA_EXEMPT_CODES.map((code) => sql`${code}`),
@@ -110,15 +163,19 @@ const REAPED_ERROR = 'timeout: the build was interrupted';
 
 export function createAppDbStore(db: Database): AppStore {
   return {
-    async upsertUser(user) {
-      const profile = { username: user.username, firstName: user.firstName };
+    async upsertUser(user, options = {}) {
+      const profile = {
+        username: user.username,
+        firstName: user.firstName,
+        ...(options.canNotifyAt === undefined ? {} : { canNotifyAt: options.canNotifyAt }),
+      };
       const [row] = await db
         .insert(users)
         .values({ telegramId: user.id, ...profile })
         .onConflictDoUpdate({ target: users.telegramId, set: profile })
         .returning(userColumns);
       if (!row) throw new Error('failed to upsert user');
-      return row;
+      return toAppUser(row);
     },
 
     async findUser(telegramId) {
@@ -127,7 +184,7 @@ export function createAppDbStore(db: Database): AppStore {
         .from(users)
         .where(eq(users.telegramId, telegramId))
         .limit(1);
-      return row;
+      return row === undefined ? undefined : toAppUser(row);
     },
 
     async markOnboarded(userId, at) {
@@ -242,8 +299,30 @@ export function createAppDbStore(db: Database): AppStore {
       const [row] = await db
         .select({ value: count() })
         .from(issues)
-        .where(and(eq(issues.userId, userId), gte(issues.createdAt, since), countsTowardQuota));
+        .where(
+          and(
+            eq(issues.userId, userId),
+            gte(issues.createdAt, since),
+            manualOnly,
+            countsTowardQuota,
+          ),
+        );
       return row?.value ?? 0;
+    },
+
+    async markOpened(userId, id) {
+      await db
+        .update(issues)
+        .set({ openedAt: sql`coalesce(${issues.openedAt}, now())` })
+        .where(
+          and(
+            eq(issues.id, id),
+            eq(issues.userId, userId),
+            eq(issues.status, 'ready'),
+            isNull(issues.deletedAt),
+            isNull(issues.openedAt),
+          ),
+        );
     },
 
     // No deleted_at filter anywhere in the claim: a deleted issue still holds its quota slot
@@ -286,6 +365,7 @@ export function createAppDbStore(db: Database): AppStore {
               and(
                 eq(issues.userId, input.userId),
                 gte(issues.createdAt, input.since),
+                manualOnly,
                 countsTowardQuota,
               ),
             );
@@ -313,6 +393,7 @@ export function createAppDbStore(db: Database): AppStore {
             periodStart: input.period.start,
             periodEnd: input.period.end,
             status: 'pending',
+            trigger: input.trigger,
           })
           .returning(stateColumns);
         if (!issue) throw new Error('failed to create issue');
