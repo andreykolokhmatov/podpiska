@@ -5,3 +5,4 @@ node_modules
 drizzle/meta
 pnpm-lock.yaml
 docs/reference
+src/collector/__fixtures__/

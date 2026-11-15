@@ -18,9 +18,11 @@
     "format": "prettier --write . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude",
     "format:check": "prettier --check . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "collect": "tsx src/collector/cli.ts"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",
     "next": "^16.4.6",
@@ -39,6 +41,7 @@
     "eslint-config-next": "^16.4.6",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.10.1",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "vitest": "^5.1.0"
   }
