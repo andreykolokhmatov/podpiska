@@ -19,9 +19,13 @@
     "format:check": "prettier --check . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "collect": "tsx src/collector/cli.ts"
+    "collect": "tsx src/collector/cli.ts",
+    "issue": "tsx src/pipeline/cli.ts",
+    "llm:smoke": "tsx src/llm/smoke.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.121",
+    "ai": "^7.0.173",
     "cheerio": "^1.2.0",
     "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",

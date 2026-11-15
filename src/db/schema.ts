@@ -90,6 +90,10 @@ export const channelDigests = pgTable(
     day: date('day', { mode: 'string' }).notNull(),
     summaryJson: jsonb('summary_json').notNull(),
     model: text('model').notNull(),
+    // Hash of prompt version + model + post texts; a changed hash invalidates today's digest.
+    inputHash: text('input_hash').notNull().default(''),
+    // Set on every upsert; a digest computed at/after its day's end is final.
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (table) => [unique('channel_digests_channel_id_day_unique').on(table.channelId, table.day)],
@@ -113,7 +117,8 @@ export const issues = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    number: integer('number').notNull(),
+    // Assigned only when the issue becomes ready, so failed runs leave no gaps.
+    number: integer('number'),
     periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
     periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
     status: text('status').$type<IssueStatus>().notNull().default('pending'),

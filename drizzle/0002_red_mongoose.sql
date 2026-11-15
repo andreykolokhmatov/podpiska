@@ -1,0 +1,1 @@
+ALTER TABLE "channel_digests" ADD COLUMN "computed_at" timestamp with time zone DEFAULT now() NOT NULL;

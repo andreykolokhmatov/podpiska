@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnvError, getDatabaseUrl, parseEnv } from './env';
+import { EnvError, getDatabaseUrl, getLlmEnv, parseEnv } from './env';
 
 const validSource = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/podpiska',
@@ -95,5 +95,37 @@ describe('getDatabaseUrl', () => {
     const error = errorOf(() => getDatabaseUrl({}, {}));
     expect(error.message).toContain('DATABASE_URL: is required');
     expect(error.message).toContain('.env.example');
+  });
+});
+
+describe('getLlmEnv', () => {
+  const key = { GOOGLE_GENERATIVE_AI_API_KEY: 'google-key' };
+
+  it('needs only the LLM variables and applies model defaults', () => {
+    const env = getLlmEnv(key);
+    expect(env.LLM_PROVIDER).toBe('google');
+    expect(env.LLM_MODEL_FAST).toBe('gemini-3.5-flash-lite');
+    expect(env.LLM_MODEL_SMART).toBe('gemini-3.5-flash');
+    expect(env.LLM_BASE_URL).toBeUndefined();
+  });
+
+  it('treats an empty LLM_BASE_URL as direct provider access', () => {
+    expect(getLlmEnv({ ...key, LLM_BASE_URL: '' }).LLM_BASE_URL).toBeUndefined();
+  });
+
+  it('strips trailing slashes from LLM_BASE_URL', () => {
+    const env = getLlmEnv({ ...key, LLM_BASE_URL: 'https://api.proxyapi.ru/google/v1beta/' });
+    expect(env.LLM_BASE_URL).toBe('https://api.proxyapi.ru/google/v1beta');
+  });
+
+  it('rejects a non-http LLM_BASE_URL', () => {
+    const error = errorOf(() => getLlmEnv({ ...key, LLM_BASE_URL: 'ftp://example.com' }));
+    expect(error.message).toContain('LLM_BASE_URL');
+  });
+
+  it('requires the key without echoing other values', () => {
+    const error = errorOf(() => getLlmEnv({ LLM_MODEL_FAST: 'secret-model' }));
+    expect(error.message).toContain('GOOGLE_GENERATIVE_AI_API_KEY');
+    expect(error.message).not.toContain('secret-model');
   });
 });

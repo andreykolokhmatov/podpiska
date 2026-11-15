@@ -52,4 +52,8 @@ describe('postUrl', () => {
   it('builds a t.me post link', () => {
     expect(postUrl('toporlive', 207402)).toBe('https://t.me/toporlive/207402');
   });
+
+  it('lowercases a mixed-case username', () => {
+    expect(postUrl('Om1_Omsk', 42)).toBe('https://t.me/om1_omsk/42');
+  });
 });

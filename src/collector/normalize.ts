@@ -85,6 +85,7 @@ export function normalizeChannel(input: string): string {
   throw new InvalidChannelError('invalid', `"${input}" is not a Telegram link`);
 }
 
+/** Telegram usernames are case-insensitive; links are canonical lowercase. */
 export function postUrl(username: string, tgPostId: number): string {
-  return `https://t.me/${username}/${tgPostId}`;
+  return `https://t.me/${username.toLowerCase()}/${tgPostId}`;
 }

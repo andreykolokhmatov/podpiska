@@ -8,6 +8,27 @@
       "when": 1794721860364,
       "tag": "0000_gifted_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794726379210,
+      "tag": "0001_harsh_ted_forrester",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794727709710,
+      "tag": "0002_red_mongoose",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794728004257,
+      "tag": "0003_reset_digest_computed_at",
+      "breakpoints": true
     }
   ]
 }
