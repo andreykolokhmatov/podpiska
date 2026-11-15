@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { slotAfterSlot } from './service';
+import { slotAfterIssue, slotAfterSlot } from './service';
 import {
   anchorToHour,
   DEFAULT_TZ,
@@ -138,5 +138,33 @@ describe('anchorToHour / slotAfterSlot', () => {
     expect(anchorToHour(slot, 8, omsk).toISOString()).toBe(slot.toISOString());
     const retry = new Date('2026-11-16T03:00:00Z'); // 09:00, same day
     expect(anchorToHour(retry, 8, omsk).toISOString()).toBe(slot.toISOString());
+  });
+});
+
+describe('slotAfterIssue (arming after a manual issue)', () => {
+  const msk = { hour: 6, timeZone: 'Europe/Moscow' };
+  // 2026-11-15 23:30 MSK
+  const lateEvening = new Date('2026-11-15T20:30:00Z');
+
+  it('daily at 6:00 after a late-evening issue → 6:00 next morning', () => {
+    const next = slotAfterIssue({ ...msk, everyDays: 1 }, lateEvening, lateEvening);
+    expect(next.toISOString()).toBe('2026-11-16T03:00:00.000Z');
+  });
+
+  it('keeps FRESH_GAP: an issue at 4:00 is not followed by one at 6:00', () => {
+    const early = new Date('2026-11-16T01:00:00Z'); // 04:00 MSK
+    const next = slotAfterIssue({ ...msk, everyDays: 1 }, early, early);
+    expect(next.toISOString()).toBe('2026-11-17T03:00:00.000Z');
+  });
+
+  it('weekly → about a week later', () => {
+    const next = slotAfterIssue({ ...msk, everyDays: 7 }, lateEvening, lateEvening);
+    expect(next.toISOString()).toBe('2026-11-22T03:00:00.000Z');
+  });
+
+  it('never in the past', () => {
+    const now = new Date('2026-11-20T10:00:00Z');
+    const next = slotAfterIssue({ ...msk, everyDays: 1 }, lateEvening, now);
+    expect(next.toISOString()).toBe('2026-11-21T03:00:00.000Z');
   });
 });

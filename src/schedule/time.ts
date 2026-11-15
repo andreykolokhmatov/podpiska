@@ -99,6 +99,15 @@ export function anchorToHour(slot: Date, hour: number, timeZone: string): Date {
   return zonedToUtc({ ...day, hour, minute: 0 }, timeZone);
 }
 
+/** The first hour:00 in the zone at or after `instant`. */
+export function firstHourAtOrAfter(instant: Date, hour: number, timeZone: string): Date {
+  const parts = zonedParts(instant, timeZone);
+  const sameDay = zonedToUtc({ ...parts, hour, minute: 0 }, timeZone);
+  return sameDay.getTime() >= instant.getTime()
+    ? sameDay
+    : zonedToUtc({ ...addCalendarDays(parts, 1), hour, minute: 0 }, timeZone);
+}
+
 /**
  * The next scheduled build: base's calendar date in the zone + everyDays, at hour:00 there.
  * If that is not after now, the first hour:00 strictly after now.

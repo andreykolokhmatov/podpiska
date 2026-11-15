@@ -6,7 +6,7 @@ import { EnvError, type MiniAppEnv } from '@/lib/env';
 import { formatDateline, mskDay } from '@/pipeline/day';
 import { safeMessage } from '@/pipeline/errors';
 import { executeIssueRun, newIssueRun, planIssuePeriod, type PipelineDeps } from '@/pipeline/run';
-import { ensureActive, mayActivate, slotAfter, zoneOf } from '@/schedule/service';
+import { ensureActive, mayActivate, slotAfterIssue, zoneOf } from '@/schedule/service';
 import type { ScheduleStore, ScheduleUser } from '@/schedule/store';
 import { isValidTimeZone } from '@/schedule/time';
 
@@ -532,7 +532,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     };
     if (mayActivate(next)) {
       const [last] = await deps.schedules.recentReady(user.id, 1);
-      if (last !== undefined) next.nextIssueAt = slotAfter(next, last.periodEnd, now);
+      if (last !== undefined) next.nextIssueAt = slotAfterIssue(next, last.periodEnd, now);
     }
     await deps.schedules.update(user.id, {
       enabled: next.enabled,

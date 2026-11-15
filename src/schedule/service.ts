@@ -1,7 +1,15 @@
 import type { NotifyOutcome } from '@/bot/notify';
 
 import type { ScheduleStore, ScheduleUser } from './store';
-import { anchorToHour, DEFAULT_TZ, isValidTimeZone, nextIssueAt } from './time';
+import { anchorToHour, DEFAULT_TZ, firstHourAtOrAfter, isValidTimeZone, nextIssueAt } from './time';
+
+const DAY_MS = 86_400_000;
+
+/**
+ * A scheduled run this soon after a manual issue is skipped (it would be a near-empty paper).
+ * Slots are armed past it, so the hub never promises an issue the run would skip.
+ */
+export const FRESH_GAP_MS = 3 * 3_600_000;
 
 export const zoneOf = (user: Pick<ScheduleUser, 'timeZone'>): string =>
   user.timeZone !== null && isValidTimeZone(user.timeZone) ? user.timeZone : DEFAULT_TZ;
@@ -18,7 +26,23 @@ export const slotAfterSlot = (
   now: Date,
 ): Date => slotAfter(user, anchorToHour(slot, user.hour, zoneOf(user)), now);
 
-/** The next slot after a ready issue that ended at `base` (or after now). */
+/**
+ * The first slot after a ready issue that ended at `lastEnd`: the first hour:00 at least one
+ * period minus a day plus FRESH_GAP later. Daily at 6:00 after an issue at 23:30 → 6:00 next
+ * morning; weekly → a week later. Never in the past.
+ */
+export const slotAfterIssue = (
+  user: Pick<ScheduleUser, 'everyDays' | 'hour' | 'timeZone'>,
+  lastEnd: Date,
+  now: Date,
+): Date => {
+  const zone = zoneOf(user);
+  const earliest = new Date(lastEnd.getTime() + (user.everyDays - 1) * DAY_MS + FRESH_GAP_MS);
+  const after = new Date(Math.max(earliest.getTime(), now.getTime() + 1));
+  return firstHourAtOrAfter(after, user.hour, zone);
+};
+
+/** Date-based next slot: base's calendar day + everyDays at hour:00 (or the next hour:00). */
 export const slotAfter = (
   user: Pick<ScheduleUser, 'everyDays' | 'hour' | 'timeZone'>,
   base: Date,
@@ -38,7 +62,7 @@ export async function ensureActive(
   if (user.nextIssueAt !== null || !mayActivate(user)) return user.nextIssueAt;
   const [last] = await store.recentReady(user.id, 1);
   if (last === undefined) return null;
-  const next = slotAfter(user, last.periodEnd, now);
+  const next = slotAfterIssue(user, last.periodEnd, now);
   return (await store.activate(user.id, next)) ? next : null;
 }
 

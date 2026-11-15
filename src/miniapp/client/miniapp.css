@@ -196,6 +196,20 @@ html * {
 }
 
 /* Accent "+" like Telegram's «Add contact» rows: icon in the 40px avatar column. */
+/* Settings-style 30px icons sit in the same 40px column as avatars and the issue icon, so every
+   row's text on the hub starts at one edge. */
+.pd-icon-col {
+  display: grid;
+  place-items: center;
+  width: 40px;
+}
+
+/* telegram-ui pads ButtonCell 18px on iOS but Cell 16px: match Cell so the texts line up. */
+.pd-root--ios .pd-button-cell {
+  gap: 16px;
+  padding-inline: 16px;
+}
+
 .pd-add-icon {
   display: grid;
   place-items: center;

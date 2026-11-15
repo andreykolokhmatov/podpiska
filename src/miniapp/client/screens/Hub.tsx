@@ -80,7 +80,11 @@ export function Hub({ data }: HubProps) {
 
       <Section header={t.schedule.hubHeader}>
         <Cell
-          before={<ColorIcon icon={CalendarClock} color="orange" />}
+          before={
+            <span className="pd-icon-col">
+              <ColorIcon icon={CalendarClock} color="orange" />
+            </span>
+          }
           after={chevron}
           onClick={() => router.push('/schedule')}
         >
@@ -100,7 +104,7 @@ export function Hub({ data }: HubProps) {
                 </span>
               }
               disabled={!buildable}
-              className={buildable ? undefined : 'pd-dimmed'}
+              className={buildable ? 'pd-button-cell' : 'pd-button-cell pd-dimmed'}
               onClick={() => void start()}
             >
               {t.hub.buildNow}
@@ -129,6 +133,7 @@ export function Hub({ data }: HubProps) {
         footer={channelCount === 0 ? t.hub.channelsFooter : undefined}
       >
         <ButtonCell
+          className="pd-button-cell"
           before={
             <span className="pd-add-icon">
               <Plus size={22} strokeWidth={2.4} />
@@ -156,7 +161,7 @@ export function Hub({ data }: HubProps) {
           </Cell>
         ))}
         {channelCount > CHANNELS_INLINE && (
-          <ButtonCell onClick={() => router.push('/channels')}>
+          <ButtonCell className="pd-button-cell" onClick={() => router.push('/channels')}>
             {t.hub.showAll(channelCount)}
           </ButtonCell>
         )}
@@ -179,7 +184,11 @@ export function Hub({ data }: HubProps) {
 
       <Section>
         <Cell
-          before={<ColorIcon icon={Archive} color="purple" />}
+          before={
+            <span className="pd-icon-col">
+              <ColorIcon icon={Archive} color="purple" />
+            </span>
+          }
           after={chevron}
           onClick={() => router.push('/archive')}
         >

@@ -10,7 +10,7 @@ import type { ClaimInput, ClaimResult } from '@/miniapp/store';
 import { safeMessage } from '@/pipeline/errors';
 import { executeIssueRun, newIssueRun, planIssuePeriod, type PipelineDeps } from '@/pipeline/run';
 
-import { applyNotifyOutcome, slotAfterSlot } from './service';
+import { applyNotifyOutcome, FRESH_GAP_MS, slotAfterSlot } from './service';
 import type { ScheduleStore } from './store';
 
 const DAY_MS = 86_400_000;
@@ -217,9 +217,9 @@ export function createCronApi(deps: CronApiDeps): CronApi {
       return skipped('paused');
     }
 
-    // A manual build just covered most of the window: wait for the next slot.
+    // A manual build just ran: a near-empty paper is not worth a build; wait for the next slot.
     const last = recent[0]?.periodEnd;
-    if (last !== undefined && last.getTime() > now.getTime() - windowMs / 2) {
+    if (last !== undefined && last.getTime() > now.getTime() - FRESH_GAP_MS) {
       return skipped('fresh');
     }
 

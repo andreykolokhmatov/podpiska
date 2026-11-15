@@ -64,7 +64,11 @@ export function TmaRoot({ children }: TmaRootProps) {
 function TmaApp({ env, children }: { env: TmaEnv; children: ReactNode }) {
   const appearance = useAppearance();
   return (
-    <AppRoot appearance={appearance} platform={env.platform} className="pd-root">
+    <AppRoot
+      appearance={appearance}
+      platform={env.platform}
+      className={`pd-root pd-root--${env.platform}`}
+    >
       <TmaContext value={env}>{children}</TmaContext>
     </AppRoot>
   );
