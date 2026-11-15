@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnvError, getDatabaseUrl, getLlmEnv, parseEnv } from './env';
+import { EnvError, getBotEnv, getDatabaseUrl, getLlmEnv, parseEnv } from './env';
 
 const validSource = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/podpiska',
@@ -127,5 +127,46 @@ describe('getLlmEnv', () => {
     const error = errorOf(() => getLlmEnv({ LLM_MODEL_FAST: 'secret-model' }));
     expect(error.message).toContain('GOOGLE_GENERATIVE_AI_API_KEY');
     expect(error.message).not.toContain('secret-model');
+  });
+});
+
+describe('getBotEnv', () => {
+  const bot = {
+    TELEGRAM_BOT_TOKEN: validSource.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET: validSource.TELEGRAM_WEBHOOK_SECRET,
+    APP_URL: 'https://podpiska.example.com/',
+  };
+
+  it('needs neither the LLM key nor the database', () => {
+    const env = getBotEnv(bot);
+    expect(env.APP_URL).toBe('https://podpiska.example.com');
+    expect(env.MAX_CHANNELS_PER_USER).toBe(50);
+  });
+
+  it('rejects an http APP_URL', () => {
+    const error = errorOf(() => getBotEnv({ ...bot, APP_URL: 'http://localhost:3000' }));
+    expect(error.message).toContain('APP_URL');
+    expect(error.message).not.toContain('localhost');
+    expect(() => parseEnv({ ...validSource, APP_URL: 'http://podpiska.example.com' })).toThrow(
+      EnvError,
+    );
+  });
+
+  it('parses MAX_CHANNELS_PER_USER and treats empty as the default', () => {
+    expect(getBotEnv({ ...bot, MAX_CHANNELS_PER_USER: '7' }).MAX_CHANNELS_PER_USER).toBe(7);
+    expect(getBotEnv({ ...bot, MAX_CHANNELS_PER_USER: '' }).MAX_CHANNELS_PER_USER).toBe(50);
+    for (const bad of ['0', '1001', '2.5', 'many']) {
+      const error = errorOf(() => getBotEnv({ ...bot, MAX_CHANNELS_PER_USER: bad }));
+      expect(error.message).toContain('MAX_CHANNELS_PER_USER');
+    }
+  });
+
+  it('requires the token and the webhook secret without echoing values', () => {
+    const error = errorOf(() =>
+      getBotEnv({ APP_URL: bot.APP_URL, TELEGRAM_BOT_TOKEN: 'oops-SECRET' }),
+    );
+    expect(error.message).toContain('TELEGRAM_BOT_TOKEN');
+    expect(error.message).toContain('TELEGRAM_WEBHOOK_SECRET');
+    expect(error.message).not.toContain('oops-SECRET');
   });
 });

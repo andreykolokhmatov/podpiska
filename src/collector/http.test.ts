@@ -75,6 +75,21 @@ describe('politeFetch', () => {
     expect(calls).toHaveLength(3);
   });
 
+  it('with retries 0 fails on the first 429 or 5xx', async () => {
+    const limited = setup([status(429, { 'Retry-After': '2' }), ok]);
+    await expect(politeFetch(URL_S, { ...limited.options, retries: 0 })).rejects.toBeInstanceOf(
+      RateLimitedError,
+    );
+    expect(limited.calls).toHaveLength(1);
+    expect(limited.sleeps).not.toContain(2000);
+
+    const down = setup([status(503), ok]);
+    await expect(politeFetch(URL_S, { ...down.options, retries: 0 })).rejects.toBeInstanceOf(
+      CollectorHttpError,
+    );
+    expect(down.calls).toHaveLength(1);
+  });
+
   it('retries network errors', async () => {
     const { options, calls } = setup([
       () => {

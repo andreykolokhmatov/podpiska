@@ -2,11 +2,15 @@ import 'dotenv/config';
 
 import { parseArgs } from 'node:util';
 
+import { Api } from 'grammy';
+
+import { createIssueNotifier } from '@/bot/notify';
+import { createBotDbStore } from '@/bot/store';
 import { collectForChannels, createDbStore, normalizeChannel, WebPreviewSource } from '@/collector';
 import { closeDb, getDb } from '@/db';
 import { createLlm } from '@/llm/client';
 import { llmConfigFromEnv } from '@/llm/config';
-import { getLlmEnv } from '@/lib/env';
+import { getBotEnv, getLlmEnv } from '@/lib/env';
 
 import { IssueFailedError, runIssuePipeline, type IssueStats } from './run';
 import {
@@ -17,7 +21,7 @@ import {
 } from './store';
 
 const USAGE =
-  'Usage: pnpm issue --user <telegram_id> [--days 1] [--channels @a @b ...] [--interests "..."] [--refresh-digests]';
+  'Usage: pnpm issue --user <telegram_id> [--days 1] [--channels @a @b ...] [--interests "..."] [--refresh-digests] [--notify]';
 
 const tokens = (stats: IssueStats): string => {
   const { digest, compose } = stats.tokens;
@@ -33,6 +37,7 @@ async function main(): Promise<number> {
       channels: { type: 'string' },
       interests: { type: 'string' },
       'refresh-digests': { type: 'boolean', default: false },
+      notify: { type: 'boolean', default: false },
     },
   });
   const telegramId = Number(values.user);
@@ -55,6 +60,8 @@ async function main(): Promise<number> {
   const usernames = channelInputs && [...new Set(channelInputs.map(normalizeChannel))];
 
   const llm = createLlm(llmConfigFromEnv(getLlmEnv()));
+  // Validated before any work so a missing bot variable fails fast, not after the LLM spend.
+  const botEnv = values.notify ? getBotEnv() : undefined;
   const db = getDb();
   try {
     const user = await upsertDevUser(db, telegramId, values.interests);
@@ -72,6 +79,18 @@ async function main(): Promise<number> {
         llm,
         now: () => new Date(),
         log: (line) => console.log(line),
+        ...(botEnv === undefined
+          ? {}
+          : {
+              notify: async (notice) => {
+                const notifier = createIssueNotifier({
+                  api: new Api(botEnv.TELEGRAM_BOT_TOKEN),
+                  appUrl: botEnv.APP_URL,
+                  store: createBotDbStore(db),
+                });
+                console.log(`notify: ${await notifier(notice)}`);
+              },
+            }),
       },
       {
         userId: user.id,

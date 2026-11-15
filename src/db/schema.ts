@@ -23,6 +23,8 @@ export const users = pgTable('users', {
   username: text('username'),
   firstName: text('first_name'),
   interestsPrompt: text('interests_prompt'),
+  // Set when Telegram answers 403 (user blocked the bot); cleared by /start.
+  botBlockedAt: timestamp('bot_blocked_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
@@ -128,6 +130,8 @@ export const issues = pgTable(
     // Fan-in counter for the QStash pipeline: compose runs once digests_done = digests_total.
     digestsTotal: integer('digests_total').notNull().default(0),
     digestsDone: integer('digests_done').notNull().default(0),
+    // Claim for the "issue ready" message: set before sending, cleared on a transient failure.
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [

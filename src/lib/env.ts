@@ -70,21 +70,35 @@ const requireProviderKey = (
   }
 };
 
+// Telegram webhooks and Mini Apps require https, so http is rejected even for dev.
+const botShape = {
+  TELEGRAM_BOT_TOKEN: requiredString('is required').pipe(
+    z.string().regex(/^\d+:[\w-]+$/, 'must look like <bot id>:<secret> from @BotFather'),
+  ),
+  TELEGRAM_WEBHOOK_SECRET: requiredString('is required').pipe(
+    z.string().regex(/^[A-Za-z0-9_-]{1,256}$/, 'must be 1-256 chars of A-Z, a-z, 0-9, _ or -'),
+  ),
+  APP_URL: requiredString('is required').pipe(
+    z
+      .url({ protocol: /^https$/, error: 'must be an https URL' })
+      .transform((value) => value.replace(/\/+$/, '')),
+  ),
+  MAX_CHANNELS_PER_USER: z.preprocess(
+    emptyToUndefined,
+    z.coerce
+      .number({ error: 'must be an integer 1..1000' })
+      .int('must be an integer 1..1000')
+      .min(1, 'must be an integer 1..1000')
+      .max(1000, 'must be an integer 1..1000')
+      .default(50),
+  ),
+};
+
 const envSchema = z
   .object({
     DATABASE_URL: databaseUrl,
     DATABASE_URL_UNPOOLED: databaseUrlUnpooled,
-    TELEGRAM_BOT_TOKEN: requiredString('is required').pipe(
-      z.string().regex(/^\d+:[\w-]+$/, 'must look like <bot id>:<secret> from @BotFather'),
-    ),
-    TELEGRAM_WEBHOOK_SECRET: requiredString('is required').pipe(
-      z.string().regex(/^[A-Za-z0-9_-]{1,256}$/, 'must be 1-256 chars of A-Z, a-z, 0-9, _ or -'),
-    ),
-    APP_URL: requiredString('is required').pipe(
-      z
-        .url({ protocol: /^https?$/, error: 'must be an http(s) URL' })
-        .transform((value) => value.replace(/\/+$/, '')),
-    ),
+    ...botShape,
     ...llmShape,
   })
   .superRefine(requireProviderKey);
@@ -148,6 +162,19 @@ export type LlmEnv = z.infer<typeof llmEnvSchema>;
 /** Validates only the LLM variables, so CLIs need no Telegram/app settings. */
 export function getLlmEnv(source: EnvSource = process.env): LlmEnv {
   const result = llmEnvSchema.safeParse(source);
+  if (!result.success) {
+    throw new EnvError(formatIssues(result.error));
+  }
+  return result.data;
+}
+
+const botEnvSchema = z.object(botShape);
+
+export type BotEnv = z.infer<typeof botEnvSchema>;
+
+/** Validates only the bot variables: the bot needs no LLM key. */
+export function getBotEnv(source: EnvSource = process.env): BotEnv {
+  const result = botEnvSchema.safeParse(source);
   if (!result.success) {
     throw new EnvError(formatIssues(result.error));
   }

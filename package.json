@@ -21,7 +21,9 @@
     "db:migrate": "drizzle-kit migrate",
     "collect": "tsx src/collector/cli.ts",
     "issue": "tsx src/pipeline/cli.ts",
-    "llm:smoke": "tsx src/llm/smoke.ts"
+    "llm:smoke": "tsx src/llm/smoke.ts",
+    "bot:setup": "tsx src/bot/setup.ts",
+    "bot:dev": "tsx src/bot/dev.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.121",
@@ -29,6 +31,7 @@
     "cheerio": "^1.2.0",
     "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",
+    "grammy": "^1.46.0",
     "next": "^16.4.6",
     "pg": "^8.23.1",
     "react": "^19.3.1",

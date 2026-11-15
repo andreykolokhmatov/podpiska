@@ -10,6 +10,8 @@ export interface PoliteFetchOptions {
   random?: () => number;
   limiter?: HostLimiter;
   timeoutMs?: number;
+  /** Retries after the first attempt (network errors, timeouts, 5xx, 429). Default 2. */
+  retries?: number;
 }
 
 export const USER_AGENT =
@@ -82,10 +84,14 @@ export async function politeFetch(url: string, options: PoliteFetchOptions = {})
   const random = options.random ?? Math.random;
   const limiter = options.limiter ?? sharedLimiter;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const retries = Math.max(
+    0,
+    Math.min(options.retries ?? RETRY_BACKOFF_MS.length, RETRY_BACKOFF_MS.length),
+  );
 
   let lastError: unknown = null;
   let retryAfterMs: number | null = null;
-  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
       const backoff = RETRY_BACKOFF_MS[attempt - 1] ?? 0;
       await sleep(retryAfterMs ?? backoff + Math.floor(random() * 500));

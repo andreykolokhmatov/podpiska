@@ -1,5 +1,5 @@
 import { APICallError } from 'ai';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { CollectResult } from '@/collector';
 
@@ -179,6 +179,33 @@ describe('runIssuePipeline', () => {
     );
     issues.counts = { messages: 0, channels: 0 };
     await expect(runIssuePipeline(deps, input)).rejects.toThrow(/collect_failed/);
+  });
+
+  it('notifies once after the issue is ready', async () => {
+    const { deps, issues } = setup(() => JSON.stringify(validDraft()));
+    const notify = vi.fn(async () => undefined);
+    const result = await runIssuePipeline({ ...deps, notify }, input);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith({ issueId: result.issueId, userId: 1, number: 1 });
+    expect(issues.issues.get(result.issueId)?.status).toBe('ready');
+  });
+
+  it('keeps the issue ready when notify throws', async () => {
+    const { deps, issues } = setup(() => JSON.stringify(validDraft()));
+    const lines: string[] = [];
+    const notify = vi.fn(async () => {
+      throw new Error('telegram down');
+    });
+    const result = await runIssuePipeline({ ...deps, notify, log: (l) => lines.push(l) }, input);
+    expect(issues.issues.get(result.issueId)?.status).toBe('ready');
+    expect(lines.some((line) => line.includes('notify failed: telegram down'))).toBe(true);
+  });
+
+  it('does not notify a failed issue', async () => {
+    const { deps } = setup(() => new Error('provider down'));
+    const notify = vi.fn(async () => undefined);
+    await expect(runIssuePipeline({ ...deps, notify }, input)).rejects.toThrow(IssueFailedError);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('refuses a transition from the wrong state', async () => {

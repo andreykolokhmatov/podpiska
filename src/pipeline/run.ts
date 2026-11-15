@@ -21,6 +21,8 @@ export interface PipelineDeps {
   log?: (line: string) => void;
   /** Max digest LLM calls in flight. */
   digestConcurrency?: number;
+  /** Called once after the issue is ready; its failure never fails the issue. */
+  notify?: (notice: { issueId: string; userId: number; number: number }) => Promise<unknown>;
 }
 
 export interface IssueStats {
@@ -246,11 +248,12 @@ export async function runIssuePipeline(
 ): Promise<PipelineResult> {
   const run = await createIssueRecord(deps, input);
   deps.log?.(`issue ${run.issueId}: pending`);
+  let result: PipelineResult;
   try {
     await runCollectStep(deps, run);
     await runDigestStep(deps, run);
     const { number, content } = await runComposeStep(deps, run);
-    return { issueId: run.issueId, number, content, stats: run.stats };
+    result = { issueId: run.issueId, number, content, stats: run.stats };
   } catch (error) {
     const message = safeMessage(error);
     try {
@@ -261,6 +264,15 @@ export async function runIssuePipeline(
     }
     throw new IssueFailedError(run.issueId, message, run.stats);
   }
+
+  if (deps.notify !== undefined) {
+    try {
+      await deps.notify({ issueId: result.issueId, userId: run.userId, number: result.number });
+    } catch (error) {
+      deps.log?.(`issue ${run.issueId}: notify failed: ${safeMessage(error)}`);
+    }
+  }
+  return result;
 }
 
 export class IssueFailedError extends Error {
