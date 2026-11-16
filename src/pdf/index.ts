@@ -6,7 +6,7 @@ import { getPdfEnv, type PdfEnv } from '@/lib/env';
 
 import { createChromiumLauncher } from './chromium';
 import { createPdfHandler, type PdfHandlerDeps } from './handler';
-import { createPdfRenderer, type RenderPdf } from './render';
+import { createPdfRenderer, issuePrintUrl, type RenderPdf } from './render';
 
 let env: PdfEnv | undefined;
 let render: RenderPdf | undefined;
@@ -22,16 +22,22 @@ const fetchIssue: PdfHandlerDeps['fetchIssue'] = async (id) => {
   return row;
 };
 
+const renderUrl: RenderPdf = (url) => {
+  render ??= createPdfRenderer({
+    launch: createChromiumLauncher({ executablePath: pdfEnv().CHROME_EXECUTABLE_PATH }),
+  });
+  return render(url);
+};
+
+/** The issue's print page as PDF; throws EnvError when the PDF env is invalid. */
+export const renderIssuePdf = (issueId: string): Promise<Uint8Array> =>
+  renderUrl(issuePrintUrl(pdfEnv().APP_URL, issueId));
+
 /** Wired per request lazily, so `next build` needs no secrets. */
 export const handlePdf = createPdfHandler({
   env: pdfEnv,
   fetchIssue,
-  render: (url) => {
-    render ??= createPdfRenderer({
-      launch: createChromiumLauncher({ executablePath: pdfEnv().CHROME_EXECUTABLE_PATH }),
-    });
-    return render(url);
-  },
+  render: renderUrl,
   now: () => new Date(),
   log: (line) => console.log(line),
 });

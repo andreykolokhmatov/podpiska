@@ -6,7 +6,6 @@ import {
   miniApp,
   openTelegramLink,
   postEvent,
-  retrieveLaunchParams,
   retrieveRawInitData,
   secondaryButton,
 } from '@tma.js/sdk-react';
@@ -22,14 +21,6 @@ function goBack(): void {
   // Full load on purpose: the newspaper and the (app) tree use different stylesheets.
   // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   else window.location.assign('/');
-}
-
-function launchPlatform(): string | undefined {
-  try {
-    return retrieveLaunchParams().tgWebAppPlatform;
-  } catch {
-    return undefined;
-  }
 }
 
 const POST_LINK ='.np a[href^="https://t.me/"]';
@@ -129,7 +120,6 @@ export function startBridge(): (() => void) | undefined {
           botUsername: promoBot(),
           origin: window.location.origin,
           mountTrigger: mountShareFab,
-          platform: launchPlatform(),
         });
       });
   }

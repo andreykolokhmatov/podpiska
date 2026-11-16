@@ -9,8 +9,6 @@ const sdk = vi.hoisted(() => {
     AccessDeniedError,
     ShareMessageError,
     shareMessage: feature<(id: string) => Promise<void>>(),
-    downloadFile: feature<(url: string, fileName: string) => Promise<void>>(),
-    openLink: feature<(url: string) => void>(),
     openTelegramLink: feature<(url: string) => void>(),
     popup: { show: feature<(options: unknown) => Promise<string>>() },
     hapticFeedback: {
@@ -47,7 +45,6 @@ const OPTIONS = {
   botUsername: 'podpiska_news_bot',
   origin: 'https://podpiska-news.vercel.app',
   mountTrigger,
-  platform: 'android' as string | undefined,
 };
 /** The native action sheet answers with this button id. */
 const choose = (id: string) => sdk.popup.show.mockResolvedValueOnce(id);
@@ -78,7 +75,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(trigger, { onClick: null, busy: [], removed: 0 });
-  for (const f of [sdk.shareMessage, sdk.downloadFile, sdk.popup.show]) {
+  for (const f of [sdk.shareMessage, sdk.popup.show]) {
     f.isAvailable.mockReturnValue(true);
   }
 });
@@ -108,7 +105,7 @@ describe('startIssueActions', () => {
         title: 'Выпуск №\u00A07',
         buttons: [
           { id: 'share', type: 'default', text: 'Поделиться' },
-          { id: 'pdf', type: 'default', text: 'Скачать PDF' },
+          { id: 'pdf', type: 'default', text: 'PDF в чат' },
           { type: 'cancel' },
         ],
       }),
@@ -195,56 +192,40 @@ describe('startIssueActions', () => {
     expect(url.searchParams.get('url')).toBe(`https://podpiska-news.vercel.app/issue/${ID}`);
   });
 
-  it('PDF: POST pdf-link → downloadFile(url, fileName); cancel silent', async () => {
-    const link = { url: 'https://x.example/api/issues/a/pdf?sig=1', fileName: 'Podpiska-7.pdf' };
-    backend((method) => (method === 'POST' ? [200, link] : ready));
-    startIssueActions(ID, OPTIONS);
-    await flush();
-    sdk.downloadFile.mockRejectedValueOnce(new sdk.AccessDeniedError('denied'));
-    choose('pdf');
-    trigger.click();
-    await flush();
-    expect(calls.at(-1)).toBe(`POST /api/app/issues/${ID}/pdf-link`);
-    expect(sdk.downloadFile).toHaveBeenCalledWith(link.url, link.fileName);
-    expect(sdk.popup.show).toHaveBeenCalledTimes(1);
-  });
-
-  it('PDF fallback without downloadFile: openLink(url)', async () => {
-    const link = { url: 'https://x.example/api/issues/a/pdf?sig=1', fileName: 'Podpiska-7.pdf' };
-    backend((method) => (method === 'POST' ? [200, link] : ready));
-    sdk.downloadFile.isAvailable.mockReturnValue(false);
+  it('PDF: POST pdf → the bot sends it to the chat; a popup says so', async () => {
+    backend((method) => (method === 'POST' ? [200, { ok: true }] : ready));
     startIssueActions(ID, OPTIONS);
     await flush();
     choose('pdf');
     trigger.click();
     await flush();
-    expect(sdk.downloadFile).not.toHaveBeenCalled();
-    expect(sdk.openLink.ifAvailable).toHaveBeenCalledWith(link.url);
+    expect(calls.at(-1)).toBe(`POST /api/app/issues/${ID}/pdf`);
+    expect(sdk.popup.show).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: 'PDF отправлен', message: 'Файл уже в чате с ботом.' }),
+    );
   });
 
-  it('PDF on Telegram Desktop: openLink(url), never its truncating downloadFile', async () => {
-    const link = { url: 'https://x.example/api/issues/a/pdf?sig=1', fileName: 'Podpiska-7.pdf' };
-    backend((method) => (method === 'POST' ? [200, link] : ready));
-    startIssueActions(ID, { ...OPTIONS, platform: 'tdesktop' });
+  it('PDF when the bot may not write → popup asks to start the bot', async () => {
+    backend((method) => (method === 'POST' ? [409, { error: 'cannot_message' }] : ready));
+    startIssueActions(ID, OPTIONS);
     await flush();
     choose('pdf');
     trigger.click();
     await flush();
-    expect(sdk.downloadFile).not.toHaveBeenCalled();
-    expect(sdk.openLink.ifAvailable).toHaveBeenCalledWith(link.url);
+    expect(sdk.popup.show).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('нажмите «Старт»') }),
+    );
   });
 
   it('PDF failure → popup', async () => {
-    const link = { url: 'https://x.example/api/issues/a/pdf?sig=1', fileName: 'Podpiska-7.pdf' };
-    backend((method) => (method === 'POST' ? [200, link] : ready));
-    sdk.downloadFile.mockRejectedValueOnce(new Error('boom'));
+    backend((method) => (method === 'POST' ? [500, { error: 'internal' }] : ready));
     startIssueActions(ID, OPTIONS);
     await flush();
     choose('pdf');
     trigger.click();
     await flush();
-    expect(sdk.popup.show).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Не удалось скачать PDF. Попробуйте ещё раз.' }),
+    expect(sdk.popup.show).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: 'Не удалось отправить PDF. Попробуйте ещё раз.' }),
     );
   });
 

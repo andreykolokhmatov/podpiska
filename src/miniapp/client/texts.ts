@@ -30,6 +30,7 @@ export const apiErrorText: Record<ClientErrorCode, string> = {
   retry_later: botTexts.retryLater,
   misconfigured: 'Сервис настроен не до конца. Попробуйте позже.',
   internal: botTexts.failure,
+  cannot_message: 'Бот не может вам написать. Откройте чат с ботом, нажмите «Старт» и попробуйте ещё раз.',
   network: 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.',
 };
 
@@ -205,13 +206,15 @@ export const t = {
   },
   issueActions: {
     share: 'Поделиться',
-    pdf: 'Скачать PDF',
-    trigger: 'Поделиться или скачать выпуск',
+    pdf: 'PDF в чат',
+    trigger: 'Поделиться выпуском или получить PDF',
     menuTitleBare: 'Выпуск',
-    menuText: 'Отправьте газету в чат или сохраните её в PDF.',
+    menuText: 'Отправьте газету в чат или получите PDF в чат с ботом.',
     errorTitle: 'Не получилось',
     shareFailed: 'Не удалось поделиться выпуском. Попробуйте ещё раз.',
-    pdfFailed: 'Не удалось скачать PDF. Попробуйте ещё раз.',
+    pdfFailed: 'Не удалось отправить PDF. Попробуйте ещё раз.',
+    pdfSentTitle: 'PDF отправлен',
+    pdfSent: 'Файл уже в чате с ботом.',
   },
   issueTitle: (number: number) => `Выпуск №\u00A0${number}`,
   issueMeta: (number: number, dateline: string) => `№ ${number} · ${dateline}`,

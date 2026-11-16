@@ -1,7 +1,5 @@
 import {
   AccessDeniedError,
-  downloadFile,
-  openLink,
   openTelegramLink,
   popup,
   shareMessage,
@@ -10,13 +8,12 @@ import {
 
 import {
   issueResponseSchema,
-  pdfLinkResponseSchema,
+  sendPdfResponseSchema,
   shareIssueResponseSchema,
 } from '@/miniapp/contract';
 import { issueStartUrl } from '@/miniapp/share';
 
 import { apiFetch } from './api';
-import { downloadsViaBrowser } from './env';
 import { haptic } from './sdk';
 import { errorText, t } from './texts';
 
@@ -41,15 +38,17 @@ export interface IssueActionsOptions {
   /** Public origin of the newspaper, for the fallback share link. */
   origin: string;
   mountTrigger: MountTrigger;
-  /** tgWebAppPlatform of the launch; undefined outside Telegram. */
-  platform: string | undefined;
 }
 
 async function showError(message: string): Promise<void> {
   haptic.error();
+  await notice(t.issueActions.errorTitle, message);
+}
+
+async function notice(title: string, message: string): Promise<void> {
   if (popup.show.isAvailable()) {
     try {
-      await popup.show({ title: t.issueActions.errorTitle, message, buttons: [{ type: 'ok' }] });
+      await popup.show({ title, message, buttons: [{ type: 'ok' }] });
       return;
     } catch {
       // Another popup is open: fall through to the plain alert.
@@ -113,20 +112,16 @@ export function startIssueActions(issueId: string, options: IssueActionsOptions)
     }
   };
 
-  const download = async () => {
-    const res = await apiFetch(`${path}/pdf-link`, pdfLinkResponseSchema, { method: 'POST' });
+  // A file in the bot chat opens on every client; downloadFile cut it on Telegram Desktop.
+  const sendPdf = async () => {
+    const res = await apiFetch(`${path}/pdf`, sendPdfResponseSchema, { method: 'POST' });
     if (!alive) return;
-    if (!res.ok) return showError(errorText(res.error.error));
-    if (!downloadFile.isAvailable() || downloadsViaBrowser(options.platform)) {
-      openLink.ifAvailable(res.data.url);
-      return;
+    if (!res.ok) {
+      const code = res.error.error;
+      return showError(code === 'internal' ? t.issueActions.pdfFailed : errorText(code));
     }
-    try {
-      await downloadFile(res.data.url, res.data.fileName);
-      haptic.success();
-    } catch (error) {
-      if (!isCancel(error)) await showError(t.issueActions.pdfFailed);
-    }
+    haptic.success();
+    await notice(t.issueActions.pdfSentTitle, t.issueActions.pdfSent);
   };
 
   const onTrigger = async (number: number | null) => {
@@ -138,7 +133,7 @@ export function startIssueActions(issueId: string, options: IssueActionsOptions)
       if (action === null || !alive) return;
       haptic.impact();
       trigger?.setBusy(true);
-      await (action === 'share' ? share(number) : download());
+      await (action === 'share' ? share(number) : sendPdf());
     } finally {
       busy = false;
       if (alive) trigger?.setBusy(false);

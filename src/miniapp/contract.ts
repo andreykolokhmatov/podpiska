@@ -69,6 +69,8 @@ export const apiErrorCodes = [
   'invalid',
   'channel_not_found',
   'retry_later',
+  // 409: the bot may not write to the user (never started or blocked)
+  'cannot_message',
   // 500
   'misconfigured',
   'internal',
@@ -261,14 +263,10 @@ export type DeleteIssueResponse = z.infer<typeof deleteIssueResponseSchema>;
 export const shareIssueResponseSchema = z.object({ preparedMessageId: z.string().min(1) });
 export type ShareIssueResponse = z.infer<typeof shareIssueResponseSchema>;
 
-// POST /api/app/issues/<id>/pdf-link — no body. Hand both to downloadFile({ url, file_name }).
-// The url is public but signed and valid until 00:00 MSK. 404 as for share.
-export const pdfLinkResponseSchema = z.object({
-  url: z.url({ protocol: /^https$/ }),
-  /** «Podpiska-N.pdf». */
-  fileName: z.string().min(1),
-});
-export type PdfLinkResponse = z.infer<typeof pdfLinkResponseSchema>;
+// POST /api/app/issues/<id>/pdf — no body. Renders the PDF; the bot that signed the initData
+// sends it to the user's chat with it. 404 as for share; 409 cannot_message when it may not write.
+export const sendPdfResponseSchema = z.object({ ok: z.literal(true) });
+export type SendPdfResponse = z.infer<typeof sendPdfResponseSchema>;
 
 // GET /api/app/schedule — the same view as me.schedule.
 // PUT /api/app/schedule — replaces the settings; 400 bad_request on a bad body (everyDays not in

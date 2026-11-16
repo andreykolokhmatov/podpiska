@@ -32,14 +32,13 @@ import {
   type IssuesResponse,
   type MeResponse,
   type OnboardingResponse,
-  type PdfLinkResponse,
   type Frequency,
   type RemoveChannelResponse,
   type ScheduleResponse,
   type ScheduleView,
+  type SendPdfResponse,
   type ShareIssueResponse,
 } from './contract';
-import type { PdfLink } from './pdf-link';
 import {
   errorCode,
   issueState,
@@ -67,8 +66,11 @@ export interface AppApiDeps {
    * reached by that bot); returns the prepared message id. Throws on any Bot API failure.
    */
   share: (input: ShareRequest) => Promise<string>;
-  /** Signed public PDF URL; throws EnvError when the PDF env is invalid. */
-  pdfLink: (input: { issueId: string; number: number }) => PdfLink;
+  /**
+   * Renders the issue PDF and sends it through the bot that signed the initData. cannot_message:
+   * the user never started that bot or blocked it. Throws EnvError when the PDF env is invalid.
+   */
+  sendPdf: (input: SendPdfRequest) => Promise<'sent' | 'cannot_message'>;
   /** Metadata only: never initData, interests or tokens. */
   log: (line: string) => void;
 }
@@ -79,6 +81,13 @@ export interface ShareRequest {
   issueId: string;
   number: number;
   headline: string | null;
+}
+
+export interface SendPdfRequest {
+  bot: MiniAppAuth['bot'];
+  telegramUserId: number;
+  issueId: string;
+  number: number;
 }
 
 export type Handler = (req: Request) => Promise<Response>;
@@ -96,7 +105,7 @@ export interface AppApi {
   getIssue: IdHandler;
   deleteIssue: IdHandler;
   shareIssue: IdHandler;
-  pdfLink: IdHandler;
+  sendPdf: IdHandler;
   getSchedule: Handler;
   putSchedule: Handler;
 }
@@ -497,10 +506,18 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     return json(200, body);
   });
 
-  const pdfLink = route('issues.pdf_link', async (req, id: string) => {
-    const { user } = await authenticate(req);
+  const sendPdf = route('issues.pdf', async (req, id: string) => {
+    const { auth, user } = await authenticate(req);
     const row = await readyIssue(user.id, id);
-    const body: PdfLinkResponse = deps.pdfLink({ issueId: row.id, number: row.number });
+    const result = await deps.sendPdf({
+      bot: auth.bot,
+      telegramUserId: auth.user.id,
+      issueId: row.id,
+      number: row.number,
+    });
+    if (result === 'cannot_message') throw fail(409, 'cannot_message');
+    deps.log(`[app] issue ${row.id}: pdf sent`);
+    const body: SendPdfResponse = { ok: true };
     return json(200, body);
   });
 
@@ -562,6 +579,6 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     getIssue,
     deleteIssue,
     shareIssue,
-    pdfLink,
+    sendPdf,
   };
 }

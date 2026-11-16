@@ -19,7 +19,7 @@ import {
   issueResponseSchema,
   issuesResponseSchema,
   meResponseSchema,
-  pdfLinkResponseSchema,
+  sendPdfResponseSchema,
   scheduleResponseSchema,
   shareIssueResponseSchema,
 } from './contract';
@@ -299,10 +299,7 @@ const setup = (
   );
   const pipeline = vi.fn(opts.pipeline ?? (() => pipelineDeps));
   const share = vi.fn<AppApiDeps['share']>(opts.share ?? (async () => 'prepared-1'));
-  const pdfLink = vi.fn<AppApiDeps['pdfLink']>(({ issueId, number }) => ({
-    url: `https://podpiska.example/api/issues/${issueId}/pdf?exp=1&sig=x`,
-    fileName: `Podpiska-${number}.pdf`,
-  }));
+  const sendPdf = vi.fn<AppApiDeps['sendPdf']>(async () => 'sent');
   const env: MiniAppEnv = {
     TELEGRAM_BOT_TOKEN: PROD,
     TELEGRAM_DEV_BOT_TOKEN: DEV,
@@ -320,7 +317,7 @@ const setup = (
     pipeline,
     schedule: (task) => tasks.push(task),
     share,
-    pdfLink,
+    sendPdf,
     log: (line) => lines.push(line),
   });
   return {
@@ -332,7 +329,7 @@ const setup = (
     addChannel,
     pipeline,
     share,
-    pdfLink,
+    sendPdf,
     pipelineDeps,
   };
 };
@@ -369,7 +366,7 @@ describe('auth on every route', () => {
     api.getIssue(req('GET', `/api/app/issues/${UUID(1)}`, { auth }), UUID(1)),
     api.deleteIssue(req('DELETE', `/api/app/issues/${UUID(1)}`, { auth }), UUID(1)),
     api.shareIssue(req('POST', `/api/app/issues/${UUID(1)}/share`, { auth }), UUID(1)),
-    api.pdfLink(req('POST', `/api/app/issues/${UUID(1)}/pdf-link`, { auth }), UUID(1)),
+    api.sendPdf(req('POST', `/api/app/issues/${UUID(1)}/pdf`, { auth }), UUID(1)),
     api.getSchedule(req('GET', '/api/app/schedule', { auth })),
     api.putSchedule(
       req('PUT', '/api/app/schedule', { auth, body: { enabled: true, everyDays: 1, hour: 8 } }),
@@ -412,7 +409,7 @@ describe('auth on every route', () => {
       pipeline: vi.fn(),
       schedule: vi.fn(),
       share: vi.fn(),
-      pdfLink: vi.fn(),
+      sendPdf: vi.fn(),
       log: vi.fn(),
     });
     const res = await api.me(req('GET', '/api/app/me'));
@@ -960,36 +957,50 @@ describe('share issue', () => {
   });
 });
 
-describe('pdf link', () => {
-  it('returns the signed link for the own ready issue', async () => {
+describe('send pdf', () => {
+  it('sends the own ready issue through the bot that signed the initData', async () => {
     const ctx = setup();
     await ctx.api.me(req('GET', '/api/app/me'));
     const issue = ctx.store.add(1, { number: 3 });
-    const res = await ctx.api.pdfLink(req('POST', '/'), issue.id);
+    const res = await ctx.api.sendPdf(req('POST', '/'), issue.id);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    const body = pdfLinkResponseSchema.parse(await res.json());
-    expect(body.fileName).toBe('Podpiska-3.pdf');
-    expect(ctx.pdfLink).toHaveBeenCalledWith({ issueId: issue.id, number: 3 });
+    expect(sendPdfResponseSchema.parse(await res.json())).toEqual({ ok: true });
+    expect(ctx.sendPdf).toHaveBeenCalledWith({
+      bot: 'prod',
+      telegramUserId: 42,
+      issueId: issue.id,
+      number: 3,
+    });
+  });
+
+  it('answers 409 cannot_message when the bot may not write to the user', async () => {
+    const ctx = setup();
+    ctx.sendPdf.mockResolvedValueOnce('cannot_message');
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 3 });
+    const res = await ctx.api.sendPdf(req('POST', '/'), issue.id);
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toBe('cannot_message');
   });
 
   it('answers 404 for a foreign or deleted issue', async () => {
     const ctx = setup();
     await ctx.api.me(req('GET', '/api/app/me'));
     for (const issue of [ctx.store.add(7, { number: 1 }), ctx.store.add(1, { deletedAt: now })]) {
-      expect((await ctx.api.pdfLink(req('POST', '/'), issue.id)).status).toBe(404);
+      expect((await ctx.api.sendPdf(req('POST', '/'), issue.id)).status).toBe(404);
     }
-    expect(ctx.pdfLink).not.toHaveBeenCalled();
+    expect(ctx.sendPdf).not.toHaveBeenCalled();
   });
 
   it('answers 500 misconfigured when the PDF env is invalid', async () => {
     const ctx = setup();
-    ctx.pdfLink.mockImplementation(() => {
+    ctx.sendPdf.mockImplementation(async () => {
       throw new EnvError('Invalid environment variables:\n  - APP_URL: is required');
     });
     await ctx.api.me(req('GET', '/api/app/me'));
     const issue = ctx.store.add(1, { number: 1 });
-    const res = await ctx.api.pdfLink(req('POST', '/'), issue.id);
+    const res = await ctx.api.sendPdf(req('POST', '/'), issue.id);
     expect(res.status).toBe(500);
     expect(await errorOf(res)).toBe('misconfigured');
   });
