@@ -47,6 +47,7 @@ const OPTIONS = {
   botUsername: 'podpiska_news_bot',
   origin: 'https://podpiska-news.vercel.app',
   mountTrigger,
+  platform: 'android' as string | undefined,
 };
 /** The native action sheet answers with this button id. */
 const choose = (id: string) => sdk.popup.show.mockResolvedValueOnce(id);
@@ -213,6 +214,18 @@ describe('startIssueActions', () => {
     backend((method) => (method === 'POST' ? [200, link] : ready));
     sdk.downloadFile.isAvailable.mockReturnValue(false);
     startIssueActions(ID, OPTIONS);
+    await flush();
+    choose('pdf');
+    trigger.click();
+    await flush();
+    expect(sdk.downloadFile).not.toHaveBeenCalled();
+    expect(sdk.openLink.ifAvailable).toHaveBeenCalledWith(link.url);
+  });
+
+  it('PDF on Telegram Desktop: openLink(url), never its truncating downloadFile', async () => {
+    const link = { url: 'https://x.example/api/issues/a/pdf?sig=1', fileName: 'Podpiska-7.pdf' };
+    backend((method) => (method === 'POST' ? [200, link] : ready));
+    startIssueActions(ID, { ...OPTIONS, platform: 'tdesktop' });
     await flush();
     choose('pdf');
     trigger.click();

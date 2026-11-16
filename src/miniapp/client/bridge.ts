@@ -6,6 +6,7 @@ import {
   miniApp,
   openTelegramLink,
   postEvent,
+  retrieveLaunchParams,
   retrieveRawInitData,
   secondaryButton,
 } from '@tma.js/sdk-react';
@@ -23,7 +24,15 @@ function goBack(): void {
   else window.location.assign('/');
 }
 
-const POST_LINK = '.np a[href^="https://t.me/"]';
+function launchPlatform(): string | undefined {
+  try {
+    return retrieveLaunchParams().tgWebAppPlatform;
+  } catch {
+    return undefined;
+  }
+}
+
+const POST_LINK ='.np a[href^="https://t.me/"]';
 
 /** The promo plate carries the bot username (server env), so the share fallback can deep-link. */
 function promoBot(): string | null {
@@ -120,6 +129,7 @@ export function startBridge(): (() => void) | undefined {
           botUsername: promoBot(),
           origin: window.location.origin,
           mountTrigger: mountShareFab,
+          platform: launchPlatform(),
         });
       });
   }

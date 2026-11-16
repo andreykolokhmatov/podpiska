@@ -16,6 +16,7 @@ import {
 import { issueStartUrl } from '@/miniapp/share';
 
 import { apiFetch } from './api';
+import { downloadsViaBrowser } from './env';
 import { haptic } from './sdk';
 import { errorText, t } from './texts';
 
@@ -40,6 +41,8 @@ export interface IssueActionsOptions {
   /** Public origin of the newspaper, for the fallback share link. */
   origin: string;
   mountTrigger: MountTrigger;
+  /** tgWebAppPlatform of the launch; undefined outside Telegram. */
+  platform: string | undefined;
 }
 
 async function showError(message: string): Promise<void> {
@@ -114,7 +117,7 @@ export function startIssueActions(issueId: string, options: IssueActionsOptions)
     const res = await apiFetch(`${path}/pdf-link`, pdfLinkResponseSchema, { method: 'POST' });
     if (!alive) return;
     if (!res.ok) return showError(errorText(res.error.error));
-    if (!downloadFile.isAvailable()) {
+    if (!downloadFile.isAvailable() || downloadsViaBrowser(options.platform)) {
       openLink.ifAvailable(res.data.url);
       return;
     }

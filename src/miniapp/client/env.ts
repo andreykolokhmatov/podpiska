@@ -8,6 +8,14 @@ export type UiPlatform = 'ios' | 'base';
 export const uiPlatform = (platform: string | undefined): UiPlatform =>
   platform === 'ios' || platform === 'macos' ? 'ios' : 'base';
 
+/**
+ * Telegram Desktop's downloadFile ends the download after the first chunk when the response
+ * has no Content-Length, and Vercel streams function responses chunked: the PDF arrives cut.
+ * There the system browser downloads it instead.
+ */
+export const downloadsViaBrowser = (platform: string | undefined): boolean =>
+  platform === 'tdesktop';
+
 /** The newspaper honours ?theme, so it matches Telegram rather than the OS setting. */
 export const issueUrl = (id: string, appearance: Appearance): string =>
   `/issue/${encodeURIComponent(id)}?tma=1&theme=${appearance}`;
