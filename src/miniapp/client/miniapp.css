@@ -196,11 +196,12 @@ html * {
 }
 
 /* Accent "+" like Telegram's «Add contact» rows: icon in the 40px avatar column. */
-/* Settings-style 30px icons sit in the same 40px column as avatars and the issue icon, so every
-   row's text on the hub starts at one edge. */
+/* Settings-style 30px icons sit in the same 40px column as avatars and the issue icon, flush
+   with its left edge: every icon on the hub starts at one line and every text at another. */
 .pd-icon-col {
   display: grid;
-  place-items: center;
+  align-items: center;
+  justify-items: start;
   width: 40px;
 }
 
