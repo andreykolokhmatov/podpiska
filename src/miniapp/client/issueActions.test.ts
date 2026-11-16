@@ -105,7 +105,7 @@ describe('startIssueActions', () => {
         title: 'Выпуск №\u00A07',
         buttons: [
           { id: 'share', type: 'default', text: 'Поделиться' },
-          { id: 'pdf', type: 'default', text: 'PDF в чат' },
+          { id: 'pdf', type: 'default', text: 'Получить PDF' },
           { type: 'cancel' },
         ],
       }),
@@ -201,7 +201,7 @@ describe('startIssueActions', () => {
     await flush();
     expect(calls.at(-1)).toBe(`POST /api/app/issues/${ID}/pdf`);
     expect(sdk.popup.show).toHaveBeenLastCalledWith(
-      expect.objectContaining({ title: 'PDF отправлен', message: 'Файл уже в чате с ботом.' }),
+      expect.objectContaining({ title: 'PDF готов', message: 'Бот прислал файл вам в личку.' }),
     );
   });
 

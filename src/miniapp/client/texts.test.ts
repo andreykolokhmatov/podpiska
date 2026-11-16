@@ -60,7 +60,7 @@ describe('dash rule', () => {
       'Выпуск пропадёт из архива, ссылка на него перестанет открываться.',
     );
     expect(t.issueActions.share).toBe('Поделиться');
-    expect(t.issueActions.pdf).toBe('PDF в чат');
+    expect(t.issueActions.pdf).toBe('Получить PDF');
   });
 
   it('schedule copy', () => {
