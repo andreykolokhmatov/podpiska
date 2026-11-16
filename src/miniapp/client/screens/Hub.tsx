@@ -80,11 +80,7 @@ export function Hub({ data }: HubProps) {
 
       <Section header={t.schedule.hubHeader}>
         <Cell
-          before={
-            <span className="pd-icon-col">
-              <ColorIcon icon={CalendarClock} color="orange" />
-            </span>
-          }
+          before={<ColorIcon icon={CalendarClock} color="orange" size={40} />}
           after={chevron}
           onClick={() => router.push('/schedule')}
         >
@@ -184,11 +180,7 @@ export function Hub({ data }: HubProps) {
 
       <Section>
         <Cell
-          before={
-            <span className="pd-icon-col">
-              <ColorIcon icon={Archive} color="purple" />
-            </span>
-          }
+          before={<ColorIcon icon={Archive} color="purple" size={40} />}
           after={chevron}
           onClick={() => router.push('/archive')}
         >
