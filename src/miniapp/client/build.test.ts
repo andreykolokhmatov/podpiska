@@ -163,7 +163,7 @@ describe('progressLabel', () => {
       progressLabel(
         issue({ status: 'digesting', progress: { step: 'digesting', done: 2, total: 5 } }),
       ),
-    ).toBe('Читаем каналы 2/5');
+    ).toBe('Читаем каналы · 40%');
     expect(
       progressLabel(
         issue({ status: 'digesting', progress: { step: 'digesting', done: null, total: null } }),
@@ -173,7 +173,7 @@ describe('progressLabel', () => {
       progressLabel(
         issue({ status: 'digesting', progress: { step: 'digesting', done: 9, total: 5 } }),
       ),
-    ).toBe('Читаем каналы 5/5');
+    ).toBe('Читаем каналы · 100%');
     expect(
       progressLabel(
         issue({ status: 'composing', progress: { step: 'composing', done: null, total: null } }),

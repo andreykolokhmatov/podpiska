@@ -90,24 +90,27 @@ export function Hub({ data }: HubProps) {
       </Section>
 
       {me.latestIssue ? (
-        <Section header={t.hub.latestHeader} footer={issueFooter ?? undefined}>
-          {status}
-          <IssueCard issue={me.latestIssue} onOpen={openIssue} />
-          {!building && (
-            <ButtonCell
-              before={
-                <span className="pd-add-icon">
-                  <RotateCw size={20} strokeWidth={2.4} />
-                </span>
-              }
-              disabled={!buildable}
-              className={buildable ? 'pd-button-cell' : 'pd-button-cell pd-dimmed'}
-              onClick={() => void start()}
-            >
-              {t.hub.buildNow}
-            </ButtonCell>
-          )}
-        </Section>
+        <>
+          {/* A section of its own: inside the latest-issue section the old dateline read as the new build's. */}
+          {state.kind !== 'idle' && <Section header={t.hub.newIssueHeader}>{status}</Section>}
+          <Section header={t.hub.latestHeader} footer={issueFooter ?? undefined}>
+            <IssueCard issue={me.latestIssue} onOpen={openIssue} />
+            {!building && (
+              <ButtonCell
+                before={
+                  <span className="pd-add-icon">
+                    <RotateCw size={20} strokeWidth={2.4} />
+                  </span>
+                }
+                disabled={!buildable}
+                className={buildable ? 'pd-button-cell' : 'pd-button-cell pd-dimmed'}
+                onClick={() => void start()}
+              >
+                {t.hub.buildNow}
+              </ButtonCell>
+            )}
+          </Section>
+        </>
       ) : (
         <>
           {state.kind === 'idle' ? (

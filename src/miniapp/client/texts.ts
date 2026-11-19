@@ -107,6 +107,7 @@ export const t = {
   hub: {
     title: 'Подписка',
     latestHeader: 'ПОСЛЕДНИЙ ВЫПУСК',
+    newIssueHeader: 'НОВЫЙ ВЫПУСК',
     read: 'Читать',
     emptyTitle: 'Здесь появится ваша газета',
     emptyNoChannels: 'Добавьте каналы ниже, и редакция соберёт из них первый выпуск.',
@@ -135,7 +136,9 @@ export const t = {
   },
   progress: {
     collecting: 'Собираем посты…',
-    digestingCounted: (done: number, total: number) => `Читаем каналы ${done}/${total}`,
+    // done/total count (channel, day) digests, not channels: a percentage avoids «16/24» for 12 channels.
+    digestingCounted: (done: number, total: number) =>
+      `Читаем каналы · ${Math.round((done / total) * 100)}%`,
     digesting: 'Читаем каналы…',
     composing: 'Верстаем номер…',
   },

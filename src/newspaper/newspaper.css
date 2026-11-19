@@ -16,6 +16,8 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--f-body);
+  /* Playfair and Old Standard default to old-style figures: «+4 °C» would sit below the line. */
+  font-variant-numeric: lining-nums;
   -webkit-text-size-adjust: 100%;
   min-height: 100vh;
 }
@@ -858,7 +860,7 @@ html:has(.np[data-theme='light']) {
 /* ---------- print (PDF renderer: A4, light, single-column layout at 794px) ---------- */
 @page {
   size: A4 portrait;
-  margin: 18mm;
+  margin: 12mm;
 }
 @media print {
   html:has(.np),
@@ -875,7 +877,8 @@ html:has(.np[data-theme='light']) {
   }
   .np .paper {
     max-width: none;
-    padding: 0;
+    /* Keeps the text off the edge of the beige paper; the white page margin stays as before. */
+    padding: 6mm 8mm;
   }
   .np .mast,
   .np .lead .hed,
