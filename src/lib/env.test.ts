@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { DAILY_CHANNEL_LOOKUPS } from '@/miniapp/contract';
+
 import {
   getCronEnv,
   EnvError,
@@ -190,6 +192,16 @@ describe('getMiniAppEnv', () => {
     expect(env.OWNER_TELEGRAM_ID).toBeUndefined();
     expect(env.MAX_CHANNELS_PER_USER).toBe(50);
     expect(env.MAX_BUILDS_PER_DAY_GLOBAL).toBe(30);
+    expect(env.MAX_CHANNEL_LOOKUPS_PER_DAY).toBe(DAILY_CHANNEL_LOOKUPS);
+  });
+
+  it('parses MAX_CHANNEL_LOOKUPS_PER_DAY and rejects out-of-range values', () => {
+    const lookups = (value: string) =>
+      getMiniAppEnv({ ...app, MAX_CHANNEL_LOOKUPS_PER_DAY: value }).MAX_CHANNEL_LOOKUPS_PER_DAY;
+    expect(lookups('42')).toBe(42);
+    expect(lookups('')).toBe(300);
+    const error = errorOf(() => lookups('0'));
+    expect(error.message).toContain('MAX_CHANNEL_LOOKUPS_PER_DAY');
   });
 
   it('parses the optional dev token, owner id and global cap', () => {

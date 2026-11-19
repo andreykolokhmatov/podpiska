@@ -93,6 +93,14 @@ export interface AppStore {
   claimPdfSend(userId: number, day: string, limit: number): Promise<boolean>;
   /** Gives back a send taken by claimPdfSend for `day` (a failed send costs nothing). */
   refundPdfSend(userId: number, day: string): Promise<void>;
+  /**
+   * Atomically takes up to `count` t.me channel lookups for the MSK `day` and returns how many
+   * were granted: min(count, what is left of `limit`), 0 when none are left. A new day resets
+   * the counter.
+   */
+  claimChannelLookups(userId: number, day: string, count: number, limit: number): Promise<number>;
+  /** Gives back `count` lookups taken for `day` that were not spent. */
+  refundChannelLookups(userId: number, day: string, count: number): Promise<void>;
   /** Remembers the uploaded PDF so the next send skips rendering. */
   savePdfFile(issueId: string, file: PdfFileRef): Promise<void>;
   /**
@@ -353,6 +361,35 @@ export function createAppDbStore(db: Database): AppStore {
         .update(users)
         .set({ pdfSendsCount: sql`greatest(${users.pdfSendsCount} - 1, 0)` })
         .where(and(eq(users.id, userId), eq(users.pdfSendsDay, day)));
+    },
+
+    async claimChannelLookups(userId, day, count, limit) {
+      if (count <= 0) return 0;
+      // Row lock: concurrent batches see each other's grants and never exceed the limit together.
+      return db.transaction(async (tx) => {
+        const [row] = await tx
+          .select({ day: users.channelLookupsDay, count: users.channelLookupsCount })
+          .from(users)
+          .where(eq(users.id, userId))
+          .for('update');
+        if (row === undefined) return 0;
+        const used = row.day === day ? row.count : 0;
+        const granted = Math.max(0, Math.min(count, limit - used));
+        if (granted === 0) return 0;
+        await tx
+          .update(users)
+          .set({ channelLookupsDay: day, channelLookupsCount: used + granted })
+          .where(eq(users.id, userId));
+        return granted;
+      });
+    },
+
+    async refundChannelLookups(userId, day, count) {
+      if (count <= 0) return;
+      await db
+        .update(users)
+        .set({ channelLookupsCount: sql`greatest(${users.channelLookupsCount} - ${count}, 0)` })
+        .where(and(eq(users.id, userId), eq(users.channelLookupsDay, day)));
     },
 
     async savePdfFile(issueId, file) {

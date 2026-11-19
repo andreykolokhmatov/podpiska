@@ -29,6 +29,26 @@ describe('error copy', () => {
   });
 });
 
+describe('channels copy', () => {
+  it('list header without a limit for the owner', () => {
+    expect(t.channels.listHeader(7, 50)).toBe('КАНАЛЫ · 7 ИЗ 50');
+    expect(t.channels.listHeader(120, null)).toBe('КАНАЛЫ · 120');
+  });
+
+  it('bulk add plurals', () => {
+    expect(t.bulk.added(1)).toBe('Добавлен 1 канал');
+    expect(t.bulk.added(3)).toBe('Добавлено 3 канала');
+    expect(t.bulk.added(11)).toBe('Добавлено 11 каналов');
+    expect(t.bulk.added(21)).toBe('Добавлен 21 канал');
+    expect(t.bulk.skipped(1)).toBe('Пропущено: 1 приватная или служебная ссылка.');
+    expect(t.bulk.skipped(5)).toBe('Пропущено: 5 приватных или служебных ссылок.');
+    expect(t.bulk.overLimit(2)).toBe('2 канала не поместились в лимит');
+    expect(t.bulk.canAdd(3, 50)).toBe('Можно ещё 3 из 50');
+    expect(t.bulk.checked(4, 10)).toBe('Проверено 4 из 10');
+    expect(t.bulk.add(12)).toBe('ДОБАВИТЬ 12');
+  });
+});
+
 describe('appendInterest', () => {
   it('starts, appends with a comma, skips duplicates', () => {
     expect(appendInterest('', 'Без спорта')).toBe('Без спорта');

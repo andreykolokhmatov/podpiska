@@ -64,6 +64,13 @@
       "when": 1795111407398,
       "tag": "0008_pdf_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795114032068,
+      "tag": "0009_channel_lookups",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,10 @@
 export type CollectorErrorCode =
-  'InvalidChannel' | 'ChannelUnavailable' | 'RateLimited' | 'HttpError' | 'ParseError';
+  | 'InvalidChannel'
+  | 'ChannelUnavailable'
+  | 'RateLimited'
+  | 'HttpError'
+  | 'ParseError'
+  | 'DeadlineExceeded';
 
 export class CollectorError extends Error {
   override readonly name: string = 'CollectorError';
@@ -67,5 +72,14 @@ export class CollectorParseError extends CollectorError {
 
   constructor(message: string) {
     super('ParseError', message);
+  }
+}
+
+/** The caller's deadline passed before the request could start; nothing was sent. */
+export class DeadlineExceededError extends CollectorError {
+  override readonly name = 'DeadlineExceededError';
+
+  constructor(message: string) {
+    super('DeadlineExceeded', message);
   }
 }

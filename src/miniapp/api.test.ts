@@ -1,17 +1,31 @@
 import { sign } from '@tma.js/init-data-node';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AddChannelError, type AddChannelResult, type UserChannelView } from '@/channels';
+import {
+  AddChannelError,
+  LookupLimitError,
+  type AddChannelResult,
+  type UserChannelView,
+} from '@/channels';
 import { EnvError, type MiniAppEnv } from '@/lib/env';
 import { seedStores, validDraft } from '@/pipeline/__fixtures__/compose-fixtures';
 import { mockStage } from '@/pipeline/__fixtures__/fakes';
 import type { PipelineDeps } from '@/pipeline/run';
 import type { RecentIssue, ScheduleStore, ScheduleUser } from '@/schedule/store';
 
-import { cleanInterests, createAppApi, type AppApiDeps, type ShareRequest } from './api';
+import {
+  cleanInterests,
+  createAppApi,
+  RESOLVE_BUDGET_MS,
+  type AppApiDeps,
+  type ShareRequest,
+} from './api';
 import {
   addChannelResponseSchema,
   apiErrorSchema,
+  BULK_BODY_MAX_BYTES,
+  BULK_CANDIDATES_MAX,
+  bulkAddResponseSchema,
   buildResponseSchema,
   channelsResponseSchema,
   deleteIssueResponseSchema,
@@ -20,6 +34,8 @@ import {
   issuesResponseSchema,
   DAILY_PDF_SENDS,
   meResponseSchema,
+  RESOLVE_BATCH_MAX,
+  resolveChannelsResponseSchema,
   sendPdfResponseSchema,
   scheduleResponseSchema,
   shareIssueResponseSchema,
@@ -181,6 +197,18 @@ class FakeAppStore implements AppStore {
     const sends = this.pdfSends.get(userId);
     if (sends?.day === day) sends.count = Math.max(0, sends.count - 1);
   }
+  lookups = new Map<number, { day: string; count: number }>();
+  async claimChannelLookups(userId: number, day: string, count: number, limit: number) {
+    const used = this.lookups.get(userId);
+    const current = used?.day === day ? used.count : 0;
+    const granted = Math.max(0, Math.min(count, limit - current));
+    if (granted > 0) this.lookups.set(userId, { day, count: current + granted });
+    return granted;
+  }
+  async refundChannelLookups(userId: number, day: string, count: number) {
+    const used = this.lookups.get(userId);
+    if (used?.day === day) used.count = Math.max(0, used.count - count);
+  }
   async savePdfFile(issueId: string, file: PdfFileRef) {
     const row = this.issues.find((i) => i.id === issueId);
     if (row) row.pdfFile = file;
@@ -299,6 +327,8 @@ const setup = (
     env?: Partial<MiniAppEnv>;
     pipeline?: () => PipelineDeps;
     addChannel?: AppApiDeps['addChannel'];
+    resolveChannels?: AppApiDeps['resolveChannels'];
+    linkChannels?: AppApiDeps['linkChannels'];
     share?: AppApiDeps['share'];
   } = {},
 ) => {
@@ -324,6 +354,25 @@ const setup = (
         channel: { username, displayUsername: username, title: 'T', avatarUrl: null },
       })),
   );
+  const resolveChannels = vi.fn<AppApiDeps['resolveChannels']>(
+    opts.resolveChannels ??
+      (async (_userId, usernames, options) => {
+        if ((await options.claimLookups(usernames.length)) === 0) throw new LookupLimitError();
+        return {
+          results: usernames.map((username) => ({
+            username,
+            status: 'found' as const,
+            channel: { username, displayUsername: username, title: 'T', avatarUrl: null },
+          })),
+          retryAfterMs: null,
+        };
+      }),
+  );
+  const linkChannels = vi.fn<AppApiDeps['linkChannels']>(
+    opts.linkChannels ??
+      (async (_userId, usernames) =>
+        usernames.map((username) => ({ username, status: 'added' as const }))),
+  );
   const pipeline = vi.fn(opts.pipeline ?? (() => pipelineDeps));
   const share = vi.fn<AppApiDeps['share']>(opts.share ?? (async () => 'prepared-1'));
   const sendPdf = vi.fn<AppApiDeps['sendPdf']>(async () => ({ kind: 'sent', fileId: 'file-1' }));
@@ -333,6 +382,7 @@ const setup = (
     OWNER_TELEGRAM_ID: OWNER,
     MAX_CHANNELS_PER_USER: 50,
     MAX_BUILDS_PER_DAY_GLOBAL: 30,
+    MAX_CHANNEL_LOOKUPS_PER_DAY: 300,
     ...opts.env,
   };
   const api = createAppApi({
@@ -341,6 +391,8 @@ const setup = (
     env: () => env,
     now: () => now,
     addChannel,
+    resolveChannels,
+    linkChannels,
     pipeline,
     schedule: (task) => tasks.push(task),
     share,
@@ -354,6 +406,8 @@ const setup = (
     tasks,
     lines,
     addChannel,
+    resolveChannels,
+    linkChannels,
     pipeline,
     share,
     sendPdf,
@@ -385,6 +439,12 @@ describe('auth on every route', () => {
     api.onboarding(req('POST', '/api/app/onboarding', { auth })),
     api.listChannels(req('GET', '/api/app/channels', { auth })),
     api.addChannel(req('POST', '/api/app/channels', { auth, body: { input: '@a' } })),
+    api.resolveChannels(
+      req('POST', '/api/app/channels/resolve', { auth, body: { usernames: ['abcde'] } }),
+    ),
+    api.bulkAddChannels(
+      req('POST', '/api/app/channels/bulk', { auth, body: { usernames: ['abcde'] } }),
+    ),
     api.removeChannel(req('DELETE', '/api/app/channels', { auth, body: { username: 'a' } })),
     api.getInterests(req('GET', '/api/app/interests', { auth })),
     api.putInterests(req('PUT', '/api/app/interests', { auth, body: { interests: 'x' } })),
@@ -433,6 +493,8 @@ describe('auth on every route', () => {
       },
       now: () => now,
       addChannel: vi.fn(),
+      resolveChannels: vi.fn(),
+      linkChannels: vi.fn(),
       pipeline: vi.fn(),
       schedule: vi.fn(),
       share: vi.fn(),
@@ -1405,5 +1467,244 @@ describe('schedule', () => {
     await api.getIssue(req('GET', '/'), ready.id);
     expect(store.opened).toEqual([ready.id]);
     expect(ready.openedAt).toEqual(now);
+  });
+});
+
+describe('channel limit for the owner', () => {
+  it('is null for the prod-signed owner in me, list and add; others get the env limit', async () => {
+    const { api, addChannel } = setup({ env: { MAX_CHANNELS_PER_USER: 7 } });
+    const owner = `tma ${initData({ id: OWNER })}`;
+    const meOwner = meResponseSchema.parse(
+      await (await api.me(req('GET', '/', { auth: owner }))).json(),
+    );
+    expect(meOwner.channels.limit).toBeNull();
+    const list = channelsResponseSchema.parse(
+      await (await api.listChannels(req('GET', '/', { auth: owner }))).json(),
+    );
+    expect(list.limit).toBeNull();
+    await api.addChannel(req('POST', '/', { auth: owner, body: { input: '@econnews' } }));
+    expect(addChannel).toHaveBeenLastCalledWith(expect.any(Number), 'econnews', null);
+
+    const dev = `tma ${initData({ id: OWNER, token: DEV })}`;
+    const meDev = meResponseSchema.parse(
+      await (await api.me(req('GET', '/', { auth: dev }))).json(),
+    );
+    expect(meDev.channels.limit).toBe(7);
+  });
+});
+
+describe('POST /api/app/channels/resolve', () => {
+  const resolve = (api: ReturnType<typeof setup>['api'], usernames: unknown, auth?: string) =>
+    api.resolveChannels(
+      req('POST', '/api/app/channels/resolve', {
+        body: { usernames },
+        ...(auth === undefined ? {} : { auth }),
+      }),
+    );
+
+  it('normalizes, dedupes for the service and answers one result per input in order', async () => {
+    const ctx = setup({
+      resolveChannels: async () => ({
+        results: [
+          {
+            username: 'econnews',
+            status: 'found',
+            channel: {
+              username: 'econnews',
+              displayUsername: 'EconNews',
+              title: 'Эконом',
+              avatarUrl: 'https://cdn/x.jpg',
+            },
+          },
+          { username: 'somebot', status: 'bot' },
+          { username: 'gonechan', status: 'pending' },
+        ],
+        retryAfterMs: 5000,
+      }),
+    });
+    const res = await resolve(ctx.api, [
+      'https://t.me/EconNews',
+      '@econnews',
+      'somebot',
+      't.me/+invite',
+      'a b',
+      'gonechan',
+    ]);
+    expect(res.status).toBe(200);
+    const body = resolveChannelsResponseSchema.parse(await res.json());
+    expect(ctx.resolveChannels).toHaveBeenCalledWith(
+      1,
+      ['econnews', 'somebot', 'gonechan'],
+      expect.objectContaining({ deadline: now.getTime() + RESOLVE_BUDGET_MS }),
+    );
+    expect(body).toEqual({
+      results: [
+        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: 'https://cdn/x.jpg' },
+        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: 'https://cdn/x.jpg' },
+        { username: 'somebot', status: 'bot' },
+        { username: 't.me/+invite', status: 'private' },
+        { username: 'a b', status: 'invalid' },
+        { username: 'gonechan', status: 'pending' },
+      ],
+      retryAfterMs: 5000,
+    });
+    expect(ctx.lines.join('\n')).toContain(
+      'channels.resolve: found=2 bot=1 private=1 invalid=1 pending=1',
+    );
+  });
+
+  it.each([[[]], [Array.from({ length: RESOLVE_BATCH_MAX + 1 }, (_, i) => `channel_${i}`)]])(
+    'answers 400 for %#-th bad batch size',
+    async (usernames) => {
+      const ctx = setup();
+      const res = await resolve(ctx.api, usernames);
+      expect(res.status).toBe(400);
+      expect(ctx.resolveChannels).not.toHaveBeenCalled();
+    },
+  );
+
+  it('claims lookups from the daily quota, refunds unused ones, 429 lookup_limit when none left', async () => {
+    const granted: number[] = [];
+    const ctx = setup({
+      env: { MAX_CHANNEL_LOOKUPS_PER_DAY: 5 },
+      resolveChannels: async (_u, usernames, options) => {
+        const grant = await options.claimLookups(usernames.length);
+        if (grant === 0) throw new LookupLimitError();
+        granted.push(grant);
+        await options.refundLookups(1);
+        return { results: [], retryAfterMs: null };
+      },
+    });
+    expect((await resolve(ctx.api, ['chan_one', 'chan_two', 'chan_three'])).status).toBe(200);
+    expect(ctx.store.lookups.get(1)).toEqual({ day: '2026-11-15', count: 2 });
+    // 3 left of 5: the batch of 4 gets a partial grant instead of a 429.
+    const partial = await resolve(ctx.api, ['chan_four', 'chan_five', 'chan_six', 'chan_seven']);
+    expect(partial.status).toBe(200);
+    expect(granted).toEqual([3, 3]);
+    expect(ctx.store.lookups.get(1)).toEqual({ day: '2026-11-15', count: 4 });
+    ctx.store.lookups.set(1, { day: '2026-11-15', count: 5 });
+    const res = await resolve(ctx.api, ['chan_eight']);
+    expect(res.status).toBe(429);
+    expect(await errorOf(res)).toBe('lookup_limit');
+    expect(ctx.store.lookups.get(1)).toEqual({ day: '2026-11-15', count: 5 });
+  });
+
+  it('refunds through the store when the service throws after claiming', async () => {
+    const ctx = setup({
+      env: { MAX_CHANNEL_LOOKUPS_PER_DAY: 5 },
+      resolveChannels: async (_u, usernames, options) => {
+        await options.claimLookups(usernames.length);
+        await options.refundLookups(usernames.length);
+        throw new Error('db down');
+      },
+    });
+    const res = await resolve(ctx.api, ['chan_one', 'chan_two']);
+    expect(res.status).toBe(500);
+    expect(ctx.store.lookups.get(1)).toEqual({ day: '2026-11-15', count: 0 });
+  });
+
+  it('never charges the prod-signed owner', async () => {
+    const ctx = setup({ env: { MAX_CHANNEL_LOOKUPS_PER_DAY: 1 } });
+    const owner = `tma ${initData({ id: OWNER })}`;
+    const res = await resolve(ctx.api, ['chan_one', 'chan_two', 'chan_three'], owner);
+    expect(res.status).toBe(200);
+    expect(ctx.store.lookups.size).toBe(0);
+  });
+
+  it('skips the service when nothing is valid', async () => {
+    const ctx = setup();
+    const res = await resolve(ctx.api, ['t.me/c/1/2']);
+    expect(resolveChannelsResponseSchema.parse(await res.json()).results).toEqual([
+      { username: 't.me/c/1/2', status: 'private' },
+    ]);
+    expect(ctx.resolveChannels).not.toHaveBeenCalled();
+  });
+
+  it('keeps the 2 KiB body cap', async () => {
+    const ctx = setup();
+    const res = await ctx.api.resolveChannels(
+      req('POST', '/', { raw: JSON.stringify({ usernames: ['x'.repeat(3000)] }) }),
+    );
+    expect(res.status).toBe(413);
+  });
+});
+
+describe('POST /api/app/channels/bulk', () => {
+  const bulk = (api: ReturnType<typeof setup>['api'], usernames: unknown, auth?: string) =>
+    api.bulkAddChannels(
+      req('POST', '/api/app/channels/bulk', {
+        body: { usernames },
+        ...(auth === undefined ? {} : { auth }),
+      }),
+    );
+
+  it('links normalized unique usernames with the env limit and reports each', async () => {
+    const ctx = setup({
+      env: { MAX_CHANNELS_PER_USER: 3 },
+      linkChannels: async () => [
+        { username: 'chan_one', status: 'added' },
+        { username: 'chan_two', status: 'exists' },
+        { username: 'chan_three', status: 'not_found' },
+        { username: 'chan_four', status: 'limit' },
+      ],
+    });
+    ctx.store.channels.set(1, [channel('chan_one'), channel('chan_two')]);
+    const res = await bulk(ctx.api, [
+      '@Chan_One',
+      'chan_one',
+      'chan_two',
+      'chan_three',
+      'chan_four',
+      'bad name',
+    ]);
+    expect(res.status).toBe(200);
+    expect(ctx.linkChannels).toHaveBeenCalledWith(
+      1,
+      ['chan_one', 'chan_two', 'chan_three', 'chan_four'],
+      3,
+    );
+    expect(bulkAddResponseSchema.parse(await res.json())).toEqual({
+      results: [
+        { username: 'chan_one', status: 'added' },
+        { username: 'chan_two', status: 'exists' },
+        { username: 'chan_three', status: 'not_found' },
+        { username: 'chan_four', status: 'limit' },
+        { username: 'bad name', status: 'not_found' },
+      ],
+      added: 1,
+      count: 2,
+      limit: 3,
+    });
+  });
+
+  it('answers 422 channel_limit when the limit stopped every add', async () => {
+    const ctx = setup({
+      env: { MAX_CHANNELS_PER_USER: 2 },
+      linkChannels: async (_u, usernames) =>
+        usernames.map((username) => ({ username, status: 'limit' as const })),
+    });
+    const res = await bulk(ctx.api, ['chan_one']);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'channel_limit', limit: 2 });
+  });
+
+  it('passes no limit for the prod-signed owner', async () => {
+    const ctx = setup();
+    const res = await bulk(ctx.api, ['chan_one'], `tma ${initData({ id: OWNER })}`);
+    expect(bulkAddResponseSchema.parse(await res.json()).limit).toBeNull();
+    expect(ctx.linkChannels).toHaveBeenCalledWith(expect.any(Number), ['chan_one'], null);
+  });
+
+  it(`accepts ${BULK_CANDIDATES_MAX} longest usernames within the body cap, rejects more`, async () => {
+    const ctx = setup();
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => `c${String(i).padStart(31, '0')}`);
+    const ok = await bulk(ctx.api, many(BULK_CANDIDATES_MAX));
+    expect(ok.status).toBe(200);
+    expect((await bulk(ctx.api, many(BULK_CANDIDATES_MAX + 1))).status).toBe(400);
+    const huge = await ctx.api.bulkAddChannels(
+      req('POST', '/', { raw: JSON.stringify({ usernames: ['x'.repeat(BULK_BODY_MAX_BYTES)] }) }),
+    );
+    expect(huge.status).toBe(413);
   });
 });

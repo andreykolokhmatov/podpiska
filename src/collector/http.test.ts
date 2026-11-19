@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ChannelUnavailableError, CollectorHttpError, RateLimitedError } from './errors';
+import {
+  ChannelUnavailableError,
+  CollectorHttpError,
+  DeadlineExceededError,
+  RateLimitedError,
+} from './errors';
 import { type FetchImpl, HostLimiter, parseRetryAfter, politeFetch, USER_AGENT } from './http';
 
 const URL_S = 'https://t.me/s/toporlive';
@@ -110,6 +115,27 @@ describe('politeFetch', () => {
   it('treats a redirect away from /s/ as an unavailable channel', async () => {
     const { options, calls } = setup([status(302, { Location: '/x' })]);
     await expect(politeFetch(URL_S, options)).rejects.toBeInstanceOf(ChannelUnavailableError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('never starts a request once the limiter wait ran past the deadline', async () => {
+    const { options, calls } = setup([ok, ok]);
+    const deadline = 1_000_000 + 500;
+    await expect(politeFetch(URL_S, { ...options, deadline })).resolves.toBe('<html>ok</html>');
+    // The limiter now holds the next start until 1_001_000, past the deadline.
+    await expect(politeFetch(URL_S, { ...options, deadline })).rejects.toBeInstanceOf(
+      DeadlineExceededError,
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it('after a failed attempt reports that failure when the deadline stops the retry', async () => {
+    const { options, calls } = setup([status(503), ok]);
+    const error = await politeFetch(URL_S, { ...options, deadline: 1_000_000 + 500 }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(CollectorHttpError);
+    expect((error as CollectorHttpError).status).toBe(503);
     expect(calls).toHaveLength(1);
   });
 

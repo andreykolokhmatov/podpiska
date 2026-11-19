@@ -412,3 +412,25 @@ html * {
   font-size: 16px;
   appearance: none;
 }
+
+/* ---------- bulk add ---------- */
+
+.pd-pick__before {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Rows that cannot be picked (subscribed, bots, not found) read as inactive. */
+.pd-pick--off {
+  cursor: default;
+}
+
+.pd-pick--off .pd-pick__before,
+.pd-pick--off .pd-pick__text {
+  opacity: 0.5;
+}
+
+.pd-progress {
+  font-variant-numeric: tabular-nums;
+}

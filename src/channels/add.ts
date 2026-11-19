@@ -10,6 +10,14 @@ import {
 
 export type LinkStatus = 'added' | 'exists' | 'limit';
 
+/** Outcome of linking one username in a bulk commit. */
+export type BulkLinkStatus = LinkStatus | 'not_found';
+
+export interface BulkLinkResult {
+  username: string;
+  status: BulkLinkStatus;
+}
+
 export interface AddChannelResult {
   status: LinkStatus;
   channel: ChannelInfo;
@@ -22,7 +30,23 @@ export interface ChannelsStore {
    * In one transaction with the user row locked: an existing link → 'exists', at the limit →
    * 'limit' (nothing written), otherwise upserts the channel and links it → 'added'.
    */
-  linkUserChannel(userId: number, channel: ChannelInfo, limit: number): Promise<LinkStatus>;
+  linkUserChannel(userId: number, channel: ChannelInfo, limit: number | null): Promise<LinkStatus>;
+  /** Known available channels among `usernames` (no scrape). */
+  findAvailableChannels(usernames: readonly string[]): Promise<ChannelInfo[]>;
+  /** Which of `usernames` the user is already subscribed to. */
+  listLinkedUsernames(userId: number, usernames: readonly string[]): Promise<string[]>;
+  /** Stores a freshly scraped channel as available (a cache for later adds). */
+  upsertChannel(channel: ChannelInfo): Promise<void>;
+  /**
+   * One transaction with the user row locked: links, in input order, the usernames known as
+   * available until the limit (null = none) is reached. Unknown/unavailable → not_found,
+   * linked → exists, over the limit → limit. One result per unique username, input order.
+   */
+  linkUserChannels(
+    userId: number,
+    usernames: readonly string[],
+    limit: number | null,
+  ): Promise<BulkLinkResult[]>;
 }
 
 export type AddChannelFailure = 'private' | 'not_found' | 'invalid' | 'retry_later';
@@ -38,7 +62,7 @@ export class AddChannelError extends Error {
   }
 }
 
-function toAddChannelError(error: unknown): AddChannelError | undefined {
+export function toAddChannelError(error: unknown): AddChannelError | undefined {
   if (error instanceof InvalidChannelError) {
     return new AddChannelError(error.reason === 'invalid' ? 'invalid' : 'private', {
       cause: error,
@@ -60,7 +84,7 @@ function toAddChannelError(error: unknown): AddChannelError | undefined {
 }
 
 export interface AddChannelDeps {
-  store: ChannelsStore;
+  store: Pick<ChannelsStore, 'findAvailableChannel' | 'linkUserChannel'>;
   source: Pick<PostSource, 'fetchChannelInfo'>;
 }
 
@@ -72,7 +96,8 @@ export async function addUserChannel(
   deps: AddChannelDeps,
   userId: number,
   username: string,
-  limit: number,
+  /** null = no limit (the owner). */
+  limit: number | null,
 ): Promise<AddChannelResult> {
   let channel = await deps.store.findAvailableChannel(username);
   if (channel === undefined) {

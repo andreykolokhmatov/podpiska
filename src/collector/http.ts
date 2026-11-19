@@ -1,4 +1,9 @@
-import { ChannelUnavailableError, CollectorHttpError, RateLimitedError } from './errors';
+import {
+  ChannelUnavailableError,
+  CollectorHttpError,
+  DeadlineExceededError,
+  RateLimitedError,
+} from './errors';
 
 export type FetchImpl = (input: string, init: RequestInit) => Promise<Response>;
 export type Sleep = (ms: number) => Promise<void>;
@@ -12,6 +17,11 @@ export interface PoliteFetchOptions {
   timeoutMs?: number;
   /** Retries after the first attempt (network errors, timeouts, 5xx, 429). Default 2. */
   retries?: number;
+  /**
+   * Epoch ms (on `now`): no attempt starts at or after it, checked after waiting for the limiter
+   * and any backoff. DeadlineExceededError when nothing was sent, else the last attempt's error.
+   */
+  deadline?: number;
 }
 
 export const USER_AGENT =
@@ -98,6 +108,10 @@ export async function politeFetch(url: string, options: PoliteFetchOptions = {})
       retryAfterMs = null;
     }
     await limiter.acquire(sleep, now, random);
+    if (options.deadline !== undefined && now() >= options.deadline) {
+      // After a failed attempt its error is the real outcome; before any, nothing was sent.
+      throw lastError ?? new DeadlineExceededError(`deadline passed before requesting ${url}`);
+    }
 
     let response: Response;
     try {

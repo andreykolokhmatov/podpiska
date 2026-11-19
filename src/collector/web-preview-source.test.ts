@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { DeadlineExceededError } from './errors';
 import { type FetchImpl, HostLimiter } from './http';
 import { WebPreviewSource } from './web-preview-source';
 
@@ -58,5 +59,17 @@ describe('WebPreviewSource.fetchChannel', () => {
     const { posts } = await src.fetchChannel('toporlive', new Date('2020-01-01T00:00:00Z'));
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(posts).toHaveLength(15);
+  });
+});
+
+describe('WebPreviewSource.fetchChannelInfo', () => {
+  it('passes the deadline to the request: nothing is sent once it has passed', async () => {
+    const { src, fetchImpl } = source({ 'https://t.me/s/toporlive': fixture('toporlive') });
+    await expect(
+      src.fetchChannelInfo('toporlive', { deadline: Date.now() - 1 }),
+    ).rejects.toBeInstanceOf(DeadlineExceededError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const info = await src.fetchChannelInfo('toporlive', { deadline: Date.now() + 60_000 });
+    expect(info.title).toBe('Топор Live');
   });
 });

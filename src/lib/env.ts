@@ -90,6 +90,8 @@ const boundedInt = (min: number, max: number, fallback: number) => {
 
 const maxChannelsPerUser = boundedInt(1, 1000, 50);
 const maxBuildsPerDayGlobal = boundedInt(1, 100_000, 30);
+// Same default as DAILY_CHANNEL_LOOKUPS in the Mini App contract.
+const maxChannelLookupsPerDay = boundedInt(1, 100_000, 300);
 
 // Telegram webhooks and Mini Apps require https, so http is rejected even for dev.
 const botShape = {
@@ -207,6 +209,7 @@ const miniAppShape = {
   ),
   MAX_CHANNELS_PER_USER: maxChannelsPerUser,
   MAX_BUILDS_PER_DAY_GLOBAL: maxBuildsPerDayGlobal,
+  MAX_CHANNEL_LOOKUPS_PER_DAY: maxChannelLookupsPerDay,
 };
 
 const miniAppEnvSchema = z.object(miniAppShape);

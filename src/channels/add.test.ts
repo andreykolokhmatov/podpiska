@@ -55,6 +55,12 @@ describe('addUserChannel', () => {
     expect(fetchChannelInfo).toHaveBeenCalledWith('toporlive');
   });
 
+  it('passes a null limit (owner) through to the store', async () => {
+    const { deps, store } = setup({ known: info });
+    await addUserChannel(deps, 1, 'toporlive', null);
+    expect(store.linkUserChannel).toHaveBeenCalledWith(1, info, null);
+  });
+
   it('passes the limit result through', async () => {
     const { deps } = setup({ link: 'limit' });
     expect((await addUserChannel(deps, 1, 'toporlive', 3)).status).toBe('limit');

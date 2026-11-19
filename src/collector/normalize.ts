@@ -16,6 +16,16 @@ const RESERVED_PATHS = new Set([
   'setlanguage',
   'confirmphone',
   'invoice',
+  'contact',
+  'giftcode',
+  'nft',
+  'stars',
+  'premium_offer',
+  'premium_multigift',
+  'addpremium',
+  'bg',
+  'm',
+  'web',
 ]);
 
 function checkUsername(candidate: string, input: string): string {

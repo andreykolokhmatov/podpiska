@@ -169,6 +169,12 @@ function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): Fetc
   let polls = 0;
   let issues = scenario === 'fresh' ? [] : [...ISSUES];
   let pdfSends = 0;
+  const seen = new Set<string>();
+  const usernames = (): string[] =>
+    body && typeof body === 'object' && 'usernames' in body && Array.isArray(body.usernames)
+      ? body.usernames.map(String)
+      : [];
+  let body: unknown;
 
   const buildState = (): IssueState => {
     polls += 1;
@@ -194,7 +200,7 @@ function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): Fetc
     await new Promise((r) => setTimeout(r, 150));
     const url = new URL(input, window.location.origin);
     const method = init.method ?? 'GET';
-    const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+    body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     const field = (key: string) =>
       body && typeof body === 'object' && key in body
         ? String((body as Record<string, unknown>)[key])
@@ -262,6 +268,46 @@ function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): Fetc
         const exists = channels.some((c) => c.username === name);
         if (!exists) channels = [channel, ...channels];
         return json(exists ? 200 : 201, { status: exists ? 'exists' : 'added', channel });
+      }
+      // Bulk add fixtures: *bot → bot, private* → private, missing* → not_found, flaky* →
+      // retry_later, slow* → pending once; everything else is a found channel.
+      case 'POST /api/app/channels/resolve': {
+        const requested = usernames();
+        await new Promise((r) => setTimeout(r, 600));
+        const results = requested.map((raw) => {
+          const username = raw.toLowerCase();
+          const once = !seen.has(username);
+          seen.add(username);
+          if (channels.some((c) => c.username === username)) {
+            return { username, status: 'subscribed' };
+          }
+          if (username.endsWith('bot')) return { username, status: 'bot' };
+          if (username.startsWith('private')) return { username: raw, status: 'private' };
+          if (username.startsWith('missing')) return { username, status: 'not_found' };
+          if (username.startsWith('flaky') && once) return { username, status: 'retry_later' };
+          if (username.startsWith('slow') && once) return { username, status: 'pending' };
+          return { username, status: 'found', title: `Канал ${username}`, avatarUrl: null };
+        });
+        return json(200, { results, retryAfterMs: null });
+      }
+      case 'POST /api/app/channels/bulk': {
+        let added = 0;
+        const results = usernames().map((username) => {
+          if (channels.some((c) => c.username === username)) {
+            return { username, status: 'exists' };
+          }
+          if (channels.length >= 20) return { username, status: 'limit' };
+          channels = [
+            { username, title: `Канал ${username}`, avatarUrl: null, available: true },
+            ...channels,
+          ];
+          added += 1;
+          return { username, status: 'added' };
+        });
+        if (added === 0 && results.some((r) => r.status === 'limit')) {
+          return json(422, { error: 'channel_limit', limit: 20 });
+        }
+        return json(200, { results, added, count: channels.length, limit: 20 });
       }
       case 'DELETE /api/app/channels':
         channels = channels.filter((c) => c.username !== field('username'));

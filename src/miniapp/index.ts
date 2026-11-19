@@ -3,15 +3,14 @@ import { after } from 'next/server';
 
 import { createIssueNotifier } from '@/bot/notify';
 import { createBotDbStore } from '@/bot/store';
-import { addUserChannel, createChannelsDbStore, createInteractiveSource } from '@/channels';
-import { getDb } from '@/db';
 import {
-  EnvError,
-  getBotEnv,
-  getLlmEnv,
-  getMiniAppEnv,
-  type MiniAppEnv,
-} from '@/lib/env';
+  addUserChannel,
+  createChannelsDbStore,
+  createInteractiveSource,
+  resolveChannels,
+} from '@/channels';
+import { getDb } from '@/db';
+import { EnvError, getBotEnv, getLlmEnv, getMiniAppEnv, type MiniAppEnv } from '@/lib/env';
 import { createLlm } from '@/llm/client';
 import { renderIssuePdf } from '@/pdf';
 import { llmConfigFromEnv } from '@/llm/config';
@@ -115,6 +114,10 @@ export function getAppApi(): AppApi {
       env: miniAppEnvOnce,
       now: () => new Date(),
       addChannel: (userId, username, limit) => addUserChannel(channelDeps, userId, username, limit),
+      resolveChannels: (userId, usernames, options) =>
+        resolveChannels({ ...channelDeps, now: Date.now }, userId, usernames, options),
+      linkChannels: (userId, usernames, limit) =>
+        channelDeps.store.linkUserChannels(userId, usernames, limit),
       pipeline: () =>
         createPipelineDeps(db, createLlm(llmConfigFromEnv(getLlmEnv())), {
           log,

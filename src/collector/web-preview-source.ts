@@ -25,8 +25,14 @@ export class WebPreviewSource implements PostSource {
     return before === null ? url : `${url}?before=${before}`;
   }
 
-  async fetchChannelInfo(username: string): Promise<ChannelInfo> {
-    const html = await politeFetch(this.pageUrl(username, null), this.fetchOptions);
+  async fetchChannelInfo(
+    username: string,
+    options: { deadline?: number } = {},
+  ): Promise<ChannelInfo> {
+    const html = await politeFetch(this.pageUrl(username, null), {
+      ...this.fetchOptions,
+      ...options,
+    });
     return parseChannelPage(html, username).info;
   }
 

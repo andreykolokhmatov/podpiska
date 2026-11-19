@@ -24,5 +24,6 @@ export interface ChannelFetchResult {
 /** The only seam for swapping the web-preview scraper for MTProto. */
 export interface PostSource {
   fetchChannel(username: string, since: Date): Promise<ChannelFetchResult>;
-  fetchChannelInfo(username: string): Promise<ChannelInfo>;
+  /** `deadline` (epoch ms): no request starts at or after it → DeadlineExceededError. */
+  fetchChannelInfo(username: string, options?: { deadline?: number }): Promise<ChannelInfo>;
 }

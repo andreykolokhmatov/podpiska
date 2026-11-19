@@ -23,12 +23,13 @@ export function configureApi(options: { initDataRaw: string | undefined; fetch?:
 interface ApiInit {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
+  signal?: AbortSignal;
 }
 
 export async function apiFetch<T>(
   path: string,
   schema: z.ZodType<T>,
-  { method = 'GET', body }: ApiInit = {},
+  { method = 'GET', body, signal }: ApiInit = {},
 ): Promise<ApiResult<T>> {
   if (!rawInitData) return { ok: false, status: 401, error: { error: 'unauthorized' } };
   const headers: Record<string, string> = { Authorization: `${AUTH_SCHEME} ${rawInitData}` };
@@ -40,6 +41,7 @@ export async function apiFetch<T>(
       method,
       headers,
       cache: 'no-store',
+      ...(signal ? { signal } : {}),
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch {

@@ -1,5 +1,6 @@
 import { texts as botTexts } from '@/bot/texts';
 import {
+  BULK_CANDIDATES_MAX,
   DAILY_BUILDS,
   DAILY_PDF_SENDS,
   INTERESTS_MAX,
@@ -25,6 +26,7 @@ export const apiErrorText: Record<ClientErrorCode, string> = {
   limit_global: 'Редакция сегодня перегружена. Попробуйте собрать выпуск завтра.',
   no_channels: 'Сначала добавьте хотя бы один канал.',
   channel_limit: 'Достигнут лимит каналов в подписке.',
+  lookup_limit: 'На сегодня проверки новых каналов закончились. Остальные можно проверить завтра.',
   private: botTexts.private,
   invalid: botTexts.invalid,
   channel_not_found: botTexts.notFound,
@@ -142,7 +144,9 @@ export const t = {
     placeholder: '@username или t.me/username',
     addFooter: 'Только публичные каналы. Можно вставить ссылку на канал или на пост.',
     add: 'ДОБАВИТЬ',
-    listHeader: (count: number, limit: number) => `КАНАЛЫ · ${count} ИЗ ${limit}`,
+    listHeader: (count: number, limit: number | null) =>
+      limit === null ? `КАНАЛЫ · ${count}` : `КАНАЛЫ · ${count} ИЗ ${limit}`,
+    bulkEntry: 'Добавить списком',
     unavailable: 'Не получилось прочитать канал',
     remove: 'Удалить',
     confirmTitle: 'Удалить канал?',
@@ -151,6 +155,40 @@ export const t = {
     emptyText: 'Добавьте первый канал – например, @username любимого издания.',
     added: (name: string) => `${name} добавлен`,
     exists: (name: string) => `${name} уже в подписке`,
+  },
+  bulk: {
+    pasteHeader: 'СПИСОК КАНАЛОВ',
+    placeholder: 'Вставьте ссылки t.me, @имена или любой текст, где они упоминаются',
+    pasteFooter: 'Найдём в тексте публичные каналы. Сам текст никуда не отправляется.',
+    find: 'НАЙТИ КАНАЛЫ',
+    nothingFound: 'В тексте не нашлось ссылок на публичные каналы.',
+    checkingHeader: 'ПРОВЕРЯЕМ КАНАЛЫ',
+    checked: (done: number, total: number) => `Проверено ${done} из ${total}`,
+    listHeader: (n: number) => `НАЙДЕНО · ${n}`,
+    selectAll: 'Выбрать все',
+    selectNone: 'Снять выбор',
+    retry: 'Проверить ещё раз',
+    status: {
+      found: null,
+      subscribed: 'Уже в подписке',
+      bot: 'Бот',
+      invalid: 'Некорректное имя',
+      private: 'Приватный канал',
+      not_found: 'Не найден или закрыт',
+      retry_later: 'Не удалось проверить',
+      pending: 'Проверяем…',
+      unchecked: 'Не проверен',
+    },
+    add: (n: number) => `ДОБАВИТЬ ${n}`,
+    canAdd: (remaining: number, limit: number) => `Можно ещё ${remaining} из ${limit}`,
+    skipped: (n: number) =>
+      `Пропущено: ${n} ${plural(n, 'приватная или служебная ссылка', 'приватные или служебные ссылки', 'приватных или служебных ссылок')}.`,
+    truncated: `Показаны первые ${BULK_CANDIDATES_MAX} каналов.`,
+    added: (n: number) =>
+      `${plural(n, 'Добавлен', 'Добавлено', 'Добавлено')} ${n} ${plural(n, 'канал', 'канала', 'каналов')}`,
+    overLimit: (n: number) =>
+      `${n} ${plural(n, 'канал не поместился', 'канала не поместились', 'каналов не поместились')} в лимит`,
+    noneAdded: 'Новых каналов нет – выбранные уже в подписке.',
   },
   interests: {
     header: 'ЧТО ВАМ ИНТЕРЕСНО',

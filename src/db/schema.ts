@@ -47,6 +47,9 @@ export const users = pgTable(
     // PDF sends on the MSK day pdf_sends_day; a new day resets the counter in the same UPDATE.
     pdfSendsDay: date('pdf_sends_day', { mode: 'string' }),
     pdfSendsCount: integer('pdf_sends_count').notNull().default(0),
+    // t.me channel lookups (cache misses of bulk add) on the MSK day channel_lookups_day.
+    channelLookupsDay: date('channel_lookups_day', { mode: 'string' }),
+    channelLookupsCount: integer('channel_lookups_count').notNull().default(0),
     createdAt: createdAt(),
   },
   (table) => [

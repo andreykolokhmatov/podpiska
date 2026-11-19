@@ -104,3 +104,58 @@ describe('PDF sends', () => {
     expect((await createAppDbStore(without.db).getReadyIssue(1, ID))?.pdfFile).toBeNull();
   });
 });
+
+describe('channel lookups', () => {
+  const claimLookups = async (row: unknown[] | null, count: number, limit = 300) => {
+    const { db, queries } = recordingDb((text) =>
+      text.startsWith('select') ? (row === null ? [] : [row]) : [],
+    );
+    const granted = await createAppDbStore(db).claimChannelLookups(1, '2026-11-20', count, limit);
+    const update = queries.find((q) => q.text.startsWith('update'));
+    return { granted, queries, update };
+  };
+
+  it('claimChannelLookups locks the user row, then adds what it grants', async () => {
+    const { granted, queries, update } = await claimLookups(['2026-11-20', 10], 4);
+    expect(granted).toBe(4);
+    const select = queries.find((q) => q.text.startsWith('select'));
+    expect(select?.text).toContain('for update');
+    expect(queries.indexOf(select!)).toBeLessThan(queries.indexOf(update!));
+    expect(update?.text).toMatch(
+      /^update "users" set "channel_lookups_day" = \$\d+, "channel_lookups_count" = \$\d+/,
+    );
+    expect(update?.params).toEqual(['2026-11-20', 14, 1]);
+  });
+
+  it('claimChannelLookups grants only what is left of the limit', async () => {
+    const { granted, update } = await claimLookups(['2026-11-20', 297], 10);
+    expect(granted).toBe(3);
+    expect(update?.params).toEqual(['2026-11-20', 300, 1]);
+  });
+
+  it('claimChannelLookups resets the counter on a new day', async () => {
+    const { granted, update } = await claimLookups(['2026-11-19', 300], 4);
+    expect(granted).toBe(4);
+    expect(update?.params).toEqual(['2026-11-20', 4, 1]);
+  });
+
+  it.each([
+    ['the limit is reached', ['2026-11-20', 300] as unknown[] | null],
+    ['the user row is missing', null],
+  ])('claimChannelLookups grants 0 and writes nothing when %s', async (_label, row) => {
+    const { granted, update } = await claimLookups(row, 4);
+    expect(granted).toBe(0);
+    expect(update).toBeUndefined();
+  });
+
+  it('refundChannelLookups decrements the same day only, never below zero, and skips 0', async () => {
+    const { db, queries } = recordingDb();
+    const store = createAppDbStore(db);
+    await store.refundChannelLookups(1, '2026-11-20', 0);
+    expect(queries).toHaveLength(0);
+    await store.refundChannelLookups(1, '2026-11-20', 3);
+    const text = queries[0]?.text ?? '';
+    expect(text).toContain('greatest("users"."channel_lookups_count" - $');
+    expect(text).toContain('"users"."channel_lookups_day" = $');
+  });
+});

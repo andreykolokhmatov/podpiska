@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
-import { AddChannelError, type AddChannelFailure, type AddChannelResult } from '@/channels';
+import {
+  AddChannelError,
+  LookupLimitError,
+  type AddChannelFailure,
+  type AddChannelResult,
+  type BulkLinkResult,
+  type ResolveChannelsResult,
+  type ResolveOptions,
+} from '@/channels';
 import { InvalidChannelError, normalizeChannel } from '@/collector';
 import { EnvError, type MiniAppEnv } from '@/lib/env';
 import { formatDateline, mskDay } from '@/pipeline/day';
@@ -14,6 +22,9 @@ import { isOwner, parseAuthHeader, verifyInitData, type MiniAppAuth } from './au
 import type { PdfSendResult } from './pdf-send';
 import {
   addChannelRequestSchema,
+  BULK_BODY_MAX_BYTES,
+  bulkAddRequestSchema,
+  resolveChannelsRequestSchema,
   DAILY_BUILDS,
   DAILY_PDF_SENDS,
   INTERESTS_MAX,
@@ -24,6 +35,10 @@ import {
   removeChannelRequestSchema,
   type AddChannelResponse,
   type ApiError,
+  type BulkAddResponse,
+  type BulkStatus,
+  type ResolveChannelsResponse,
+  type ResolvedChannel,
   type ApiErrorCode,
   type BuildResponse,
   type ChannelsResponse,
@@ -58,7 +73,20 @@ export interface AppApiDeps {
   /** Throws EnvError when the Mini App env is invalid (→ 500 misconfigured). */
   env: () => MiniAppEnv;
   now: () => Date;
-  addChannel: (userId: number, username: string, limit: number) => Promise<AddChannelResult>;
+  /** limit null = no channel limit (the owner). */
+  addChannel: (userId: number, username: string, limit: number | null) => Promise<AddChannelResult>;
+  /** resolveChannels from '@/channels' with the store, an interactive source and a clock bound. */
+  resolveChannels: (
+    userId: number,
+    usernames: readonly string[],
+    options: ResolveOptions,
+  ) => Promise<ResolveChannelsResult>;
+  /** ChannelsStore.linkUserChannels. */
+  linkChannels: (
+    userId: number,
+    usernames: readonly string[],
+    limit: number | null,
+  ) => Promise<BulkLinkResult[]>;
   /** Pipeline wiring; throws EnvError when the LLM env is invalid (checked before any claim). */
   pipeline: () => PipelineDeps;
   /** Runs work after the response is sent (next/server `after`). */
@@ -102,6 +130,8 @@ export interface AppApi {
   onboarding: Handler;
   listChannels: Handler;
   addChannel: Handler;
+  resolveChannels: Handler;
+  bulkAddChannels: Handler;
   removeChannel: Handler;
   getInterests: Handler;
   putInterests: Handler;
@@ -118,6 +148,9 @@ export interface AppApi {
 export type IdHandler = (req: Request, id: string) => Promise<Response>;
 
 const MAX_BODY_BYTES = 2048;
+
+/** Time budget for t.me fetches of one resolve call; a started fetch may add ~6s more. */
+export const RESOLVE_BUDGET_MS = 12_000;
 
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
@@ -137,10 +170,10 @@ class ApiFailure extends Error {
 const fail = (status: number, error: ApiErrorCode, extra: Omit<ApiError, 'error'> = {}) =>
   new ApiFailure(status, { error, ...extra });
 
-/** Reads at most MAX_BODY_BYTES, aborting the stream past the cap (Content-Length may be absent). */
-async function readCapped(req: Request): Promise<string> {
+/** Reads at most maxBytes, aborting the stream past the cap (Content-Length may be absent). */
+async function readCapped(req: Request, maxBytes: number): Promise<string> {
   const declared = Number(req.headers.get('content-length') ?? '0');
-  if (declared > MAX_BODY_BYTES) throw fail(413, 'bad_request');
+  if (declared > maxBytes) throw fail(413, 'bad_request');
   if (req.body === null) return '';
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -149,7 +182,7 @@ async function readCapped(req: Request): Promise<string> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       await reader.cancel();
       throw fail(413, 'bad_request');
     }
@@ -164,8 +197,12 @@ async function readCapped(req: Request): Promise<string> {
   return new TextDecoder().decode(bytes);
 }
 
-async function readBody<T>(req: Request, schema: z.ZodType<T>): Promise<T> {
-  const text = await readCapped(req);
+async function readBody<T>(
+  req: Request,
+  schema: z.ZodType<T>,
+  options: { maxBytes?: number } = {},
+): Promise<T> {
+  const text = await readCapped(req, options.maxBytes ?? MAX_BODY_BYTES);
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -216,6 +253,31 @@ const addFailureCode: Record<AddChannelFailure, ApiErrorCode> = {
 };
 
 const uuidSchema = z.uuid();
+
+/** null = no channel limit: the owner (prod-signed initData) is never capped in the Mini App. */
+export const channelLimit = (owner: boolean, env: MiniAppEnv): number | null =>
+  owner ? null : env.MAX_CHANNELS_PER_USER;
+
+type Normalized = { ok: true; username: string } | { ok: false; reason: 'invalid' | 'private' };
+
+function tryNormalize(input: string): Normalized {
+  try {
+    return { ok: true, username: normalizeChannel(input) };
+  } catch (error) {
+    if (!(error instanceof InvalidChannelError)) throw error;
+    return { ok: false, reason: error.reason === 'invalid' ? 'invalid' : 'private' };
+  }
+}
+
+const countBy = <T extends string>(values: readonly T[]): string =>
+  Object.entries(
+    values.reduce<Record<string, number>>((acc, value) => {
+      acc[value] = (acc[value] ?? 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .map(([key, value]) => `${key}=${value}`)
+    .join(' ');
 
 const asFrequency = (value: number): Frequency =>
   (FREQUENCIES as readonly number[]).includes(value) ? (value as Frequency) : 1;
@@ -312,7 +374,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       user: { telegramId: user.telegramId, firstName: user.firstName, username: user.username },
       onboarded: user.onboardedAt !== null,
       owner,
-      channels: { count: channelCount, limit: env.MAX_CHANNELS_PER_USER },
+      channels: { count: channelCount, limit: channelLimit(owner, env) },
       hasInterests: user.interests !== null && user.interests.trim() !== '',
       latestIssue: latest === undefined ? null : issueSummary(latest),
       inFlight: inFlight === undefined || isStale(inFlight, now) ? null : issueState(inFlight, now),
@@ -330,7 +392,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
   });
 
   const listChannels = route('channels.list', async (req) => {
-    const { user, env } = await authenticate(req);
+    const { user, env, owner } = await authenticate(req);
     const rows = await deps.store.listChannels(user.id);
     const body: ChannelsResponse = {
       channels: rows.map((row) => ({
@@ -339,13 +401,14 @@ export function createAppApi(deps: AppApiDeps): AppApi {
         avatarUrl: row.avatarUrl,
         available: row.isAvailable,
       })),
-      limit: env.MAX_CHANNELS_PER_USER,
+      limit: channelLimit(owner, env),
     };
     return json(200, body);
   });
 
   const addChannel = route('channels.add', async (req) => {
-    const { user, env } = await authenticate(req);
+    const { user, env, owner } = await authenticate(req);
+    const limit = channelLimit(owner, env);
     const { input } = await readBody(req, addChannelRequestSchema);
     let username: string;
     try {
@@ -356,13 +419,13 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     }
     let result: AddChannelResult;
     try {
-      result = await deps.addChannel(user.id, username, env.MAX_CHANNELS_PER_USER);
+      result = await deps.addChannel(user.id, username, limit);
     } catch (error) {
       if (!(error instanceof AddChannelError)) throw error;
       throw fail(422, addFailureCode[error.reason]);
     }
     if (result.status === 'limit') {
-      throw fail(422, 'channel_limit', { limit: env.MAX_CHANNELS_PER_USER });
+      throw fail(422, 'channel_limit', limit === null ? {} : { limit });
     }
     const { channel } = result;
     const body: AddChannelResponse = {
@@ -375,6 +438,91 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       },
     };
     return json(result.status === 'added' ? 201 : 200, body);
+  });
+
+  const resolveChannels = route('channels.resolve', async (req) => {
+    const { user, env, owner } = await authenticate(req);
+    const { usernames } = await readBody(req, resolveChannelsRequestSchema);
+    const inputs = usernames.map(tryNormalize);
+    const valid = [...new Set(inputs.flatMap((input) => (input.ok ? [input.username] : [])))];
+    const now = deps.now();
+    const day = mskDay(now);
+    let resolved: ResolveChannelsResult = { results: [], retryAfterMs: null };
+    if (valid.length > 0) {
+      try {
+        resolved = await deps.resolveChannels(user.id, valid, {
+          deadline: now.getTime() + RESOLVE_BUDGET_MS,
+          claimLookups: (count) =>
+            owner
+              ? Promise.resolve(count)
+              : deps.store.claimChannelLookups(
+                  user.id,
+                  day,
+                  count,
+                  env.MAX_CHANNEL_LOOKUPS_PER_DAY,
+                ),
+          refundLookups: (count) =>
+            owner ? Promise.resolve() : deps.store.refundChannelLookups(user.id, day, count),
+        });
+      } catch (error) {
+        if (error instanceof LookupLimitError) throw fail(429, 'lookup_limit');
+        throw error;
+      }
+    }
+    const byName = new Map(resolved.results.map((result) => [result.username, result]));
+    const results = usernames.map((raw, index): ResolvedChannel => {
+      const input = inputs[index];
+      if (input === undefined || !input.ok) {
+        return { username: raw, status: input?.reason ?? 'invalid' };
+      }
+      const found = byName.get(input.username);
+      if (found === undefined) return { username: input.username, status: 'pending' };
+      return {
+        username: input.username,
+        status: found.status,
+        ...(found.channel === undefined
+          ? {}
+          : { title: found.channel.title, avatarUrl: found.channel.avatarUrl }),
+      };
+    });
+    deps.log(`[app] channels.resolve: ${countBy(results.map((result) => result.status))}`);
+    const body: ResolveChannelsResponse = { results, retryAfterMs: resolved.retryAfterMs };
+    return json(200, body);
+  });
+
+  const bulkAddChannels = route('channels.bulk', async (req) => {
+    const { user, env, owner } = await authenticate(req);
+    const { usernames } = await readBody(req, bulkAddRequestSchema, {
+      maxBytes: BULK_BODY_MAX_BYTES,
+    });
+    const limit = channelLimit(owner, env);
+    const keys = new Set<string>();
+    const valid: string[] = [];
+    for (const raw of usernames) {
+      const input = tryNormalize(raw);
+      const key = input.ok ? input.username : raw;
+      if (keys.has(key)) continue;
+      keys.add(key);
+      if (input.ok) valid.push(input.username);
+    }
+    const linked = valid.length === 0 ? [] : await deps.linkChannels(user.id, valid, limit);
+    const statusOf = new Map<string, BulkStatus>(linked.map((r) => [r.username, r.status]));
+    const results = [...keys].map((username) => ({
+      username,
+      status: statusOf.get(username) ?? 'not_found',
+    }));
+    const added = results.filter((result) => result.status === 'added').length;
+    deps.log(`[app] channels.bulk: ${countBy(results.map((result) => result.status))}`);
+    if (added === 0 && results.some((result) => result.status === 'limit')) {
+      throw fail(422, 'channel_limit', limit === null ? {} : { limit });
+    }
+    const body: BulkAddResponse = {
+      results,
+      added,
+      count: await deps.store.countChannels(user.id),
+      limit,
+    };
+    return json(200, body);
   });
 
   const removeChannel = route('channels.remove', async (req) => {
@@ -636,6 +784,8 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     onboarding,
     listChannels,
     addChannel,
+    resolveChannels,
+    bulkAddChannels,
     removeChannel,
     getInterests,
     putInterests,

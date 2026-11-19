@@ -1,7 +1,8 @@
 'use client';
 
 import { Avatar, Cell, IconButton, Input, Placeholder, Section } from '@telegram-apps/telegram-ui';
-import { Trash2 } from 'lucide-react';
+import { ChevronRight, ListPlus, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import {
@@ -13,7 +14,9 @@ import {
 } from '@/miniapp/contract';
 
 import { apiFetch } from '../api';
-import { initials } from '../env';
+import { clearBulkFlash, peekBulkFlash } from '../bulkAdd';
+import { ColorIcon } from '../components/ColorIcon';
+import { initials, withFromApp } from '../env';
 import { useBackButton, useGoBack, useMainButton } from '../hooks';
 import { confirmDestructive, haptic } from '../sdk';
 import { errorText, t } from '../texts';
@@ -26,13 +29,20 @@ type Message = { kind: 'error' | 'success'; text: string } | null;
 
 export function Channels() {
   const goBack = useGoBack();
+  const router = useRouter();
   const { resource, reload, setData } = useApi(() =>
     apiFetch('/api/app/channels', channelsResponseSchema),
   );
   const [input, setInput] = useState('');
   const [adding, setAdding] = useState(false);
-  const [message, setMessage] = useState<Message>(null);
+  // Back from «Добавить списком» with its result; peeked, not taken: StrictMode inits twice.
+  const [message, setMessage] = useState<Message>(() => {
+    const flash = peekBulkFlash();
+    return flash ? { kind: 'success', text: flash } : null;
+  });
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => clearBulkFlash(), []);
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('add') === '1') inputRef.current?.focus();
@@ -138,6 +148,17 @@ export function Channels() {
           />
         </Section>
       </form>
+
+      <Section>
+        <Cell
+          className="pd-icon-cell"
+          before={<ColorIcon icon={ListPlus} color="blue" size={40} />}
+          after={<ChevronRight className="pd-chevron" size={20} />}
+          onClick={() => router.push(withFromApp('/channels/bulk'))}
+        >
+          {t.channels.bulkEntry}
+        </Cell>
+      </Section>
 
       {resource.status === 'loading' && <Loading />}
       {resource.status === 'error' && <LoadError error={resource.error} onRetry={reload} />}

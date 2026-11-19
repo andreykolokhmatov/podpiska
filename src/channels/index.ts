@@ -1,6 +1,7 @@
 import { WebPreviewSource } from '@/collector';
 
 export * from './add';
+export * from './resolve';
 export * from './store';
 
 /** For interactive adds (bot, Mini App): fail fast instead of making the user wait. */
