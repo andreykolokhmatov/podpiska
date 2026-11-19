@@ -11,9 +11,11 @@ import type { ScheduleStore, ScheduleUser } from '@/schedule/store';
 import { isValidTimeZone } from '@/schedule/time';
 
 import { isOwner, parseAuthHeader, verifyInitData, type MiniAppAuth } from './auth';
+import type { PdfSendResult } from './pdf-send';
 import {
   addChannelRequestSchema,
   DAILY_BUILDS,
+  DAILY_PDF_SENDS,
   INTERESTS_MAX,
   FREQUENCIES,
   issuesQuerySchema,
@@ -48,7 +50,7 @@ import {
   quotaDayStart,
   STALE_MS,
 } from './status';
-import type { AppStore, AppUser, ReadyIssueRow } from './store';
+import type { AppStore, AppUser, PdfIssueRow, ReadyIssueRow } from './store';
 
 export interface AppApiDeps {
   store: AppStore;
@@ -67,10 +69,11 @@ export interface AppApiDeps {
    */
   share: (input: ShareRequest) => Promise<string>;
   /**
-   * Renders the issue PDF and sends it through the bot that signed the initData. cannot_message:
-   * the user never started that bot or blocked it. Throws EnvError when the PDF env is invalid.
+   * Sends the issue PDF through the bot that signed the initData: the cached file_id when given,
+   * else renders and uploads. cannot_message: the user never started that bot or blocked it.
+   * Throws EnvError when the PDF env is invalid.
    */
-  sendPdf: (input: SendPdfRequest) => Promise<'sent' | 'cannot_message'>;
+  sendPdf: (input: SendPdfRequest) => Promise<PdfSendResult>;
   /** Metadata only: never initData, interests or tokens. */
   log: (line: string) => void;
 }
@@ -88,6 +91,8 @@ export interface SendPdfRequest {
   telegramUserId: number;
   issueId: string;
   number: number;
+  /** file_id uploaded earlier by this same bot, or null. */
+  cachedFileId: string | null;
 }
 
 export type Handler = (req: Request) => Promise<Response>;
@@ -132,11 +137,35 @@ class ApiFailure extends Error {
 const fail = (status: number, error: ApiErrorCode, extra: Omit<ApiError, 'error'> = {}) =>
   new ApiFailure(status, { error, ...extra });
 
-async function readBody<T>(req: Request, schema: z.ZodType<T>): Promise<T> {
+/** Reads at most MAX_BODY_BYTES, aborting the stream past the cap (Content-Length may be absent). */
+async function readCapped(req: Request): Promise<string> {
   const declared = Number(req.headers.get('content-length') ?? '0');
   if (declared > MAX_BODY_BYTES) throw fail(413, 'bad_request');
-  const text = await req.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) throw fail(413, 'bad_request');
+  if (req.body === null) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw fail(413, 'bad_request');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+async function readBody<T>(req: Request, schema: z.ZodType<T>): Promise<T> {
+  const text = await readCapped(req);
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -227,13 +256,21 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     return { auth: result.auth, env };
   };
 
-  const authenticate = async (req: Request): Promise<Session> => {
+  /**
+   * `refresh` (me, onboarding) writes the profile from initData; other routes only read the user
+   * and create it if missing. Only `me` stamps can_notify_at: a replayed initData (valid for 24h)
+   * on every route would otherwise undo a later "bot cannot reach the user" mark.
+   */
+  const authenticate = async (
+    req: Request,
+    mode: 'read' | 'refresh' | 'me' = 'read',
+  ): Promise<Session> => {
     const { auth, env } = verify(req);
+    const found = mode === 'read' ? await deps.store.findUser(auth.user.id) : undefined;
     // The dev bot's write permission says nothing about the prod bot that sends notices.
-    const user = await deps.store.upsertUser(
-      auth.user,
-      auth.bot === 'prod' && auth.allowsWriteToPm ? { canNotifyAt: deps.now() } : {},
-    );
+    const stamp = mode === 'me' && auth.bot === 'prod' && auth.allowsWriteToPm;
+    const user =
+      found ?? (await deps.store.upsertUser(auth.user, stamp ? { canNotifyAt: deps.now() } : {}));
     return { auth, user, env, owner: isOwner(auth, env.OWNER_TELEGRAM_ID) };
   };
 
@@ -255,7 +292,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     };
 
   const me = route('me', async (req) => {
-    const { user, env, owner } = await authenticate(req);
+    const { user, env, owner } = await authenticate(req, 'me');
     const now = deps.now();
     const schedule = { ...user.schedule };
     const tz = new URL(req.url).searchParams.get('tz');
@@ -286,7 +323,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
   });
 
   const onboarding = route('onboarding', async (req) => {
-    const { user } = await authenticate(req);
+    const { user } = await authenticate(req, 'refresh');
     const at = await deps.store.markOnboarded(user.id, deps.now());
     const body: OnboardingResponse = { onboardedAt: at.toISOString() };
     return json(200, body);
@@ -485,7 +522,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
   });
 
   /** The user's own ready, non-deleted issue; anything else is 404 before any side effect. */
-  const readyIssue = async (userId: number, id: string): Promise<ReadyIssueRow> => {
+  const readyIssue = async (userId: number, id: string): Promise<PdfIssueRow> => {
     if (!uuidSchema.safeParse(id).success) throw fail(404, 'not_found');
     const row = await deps.store.getReadyIssue(userId, id);
     if (row === undefined) throw fail(404, 'not_found');
@@ -507,15 +544,41 @@ export function createAppApi(deps: AppApiDeps): AppApi {
   });
 
   const sendPdf = route('issues.pdf', async (req, id: string) => {
-    const { auth, user } = await authenticate(req);
+    const { auth, user, owner } = await authenticate(req);
     const row = await readyIssue(user.id, id);
-    const result = await deps.sendPdf({
-      bot: auth.bot,
-      telegramUserId: auth.user.id,
-      issueId: row.id,
-      number: row.number,
-    });
-    if (result === 'cannot_message') throw fail(409, 'cannot_message');
+    const cachedFileId = row.pdfFile?.bot === auth.bot ? row.pdfFile.fileId : null;
+
+    // Taken before sending (atomic), given back on any failure: only successful sends count.
+    const day = mskDay(deps.now());
+    const limited = !owner;
+    if (limited && !(await deps.store.claimPdfSend(user.id, day, DAILY_PDF_SENDS))) {
+      throw fail(429, 'limit');
+    }
+    let result: PdfSendResult;
+    try {
+      result = await deps.sendPdf({
+        bot: auth.bot,
+        telegramUserId: auth.user.id,
+        issueId: row.id,
+        number: row.number,
+        cachedFileId,
+      });
+    } catch (error) {
+      if (limited) await deps.store.refundPdfSend(user.id, day);
+      throw error;
+    }
+    if (result.kind === 'cannot_message') {
+      if (limited) await deps.store.refundPdfSend(user.id, day);
+      throw fail(409, 'cannot_message');
+    }
+    if (result.fileId !== null && result.fileId !== cachedFileId) {
+      try {
+        await deps.store.savePdfFile(row.id, { fileId: result.fileId, bot: auth.bot });
+      } catch (error) {
+        // The user already has the PDF; a lost cache entry only costs the next render.
+        deps.log(`[app] issue ${row.id}: pdf not cached: ${safeMessage(error)}`);
+      }
+    }
     deps.log(`[app] issue ${row.id}: pdf sent`);
     const body: SendPdfResponse = { ok: true };
     return json(200, body);
@@ -536,6 +599,8 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       throw fail(400, 'bad_request');
     }
     const now = deps.now();
+    // Trust-on-client: a forged flag only arms notices the bot sends to this same user, and the
+    // first unreachable send clears can_notify_at again.
     const granted = input.writeAccessGranted === true && auth.bot === 'prod';
     const next: ScheduleUser = {
       ...user.schedule,

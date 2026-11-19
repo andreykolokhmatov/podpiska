@@ -2,12 +2,13 @@ import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from '
 
 import { listUserChannels, removeUserChannel, type UserChannelView } from '@/channels';
 import type { Database } from '@/db';
-import { issues, userChannels, users, type IssueTrigger } from '@/db/schema';
+import { issues, userChannels, users, type IssueTrigger, type PdfBot } from '@/db/schema';
 import type { TimeRange } from '@/pipeline/store';
 import type { ScheduleUser } from '@/schedule/store';
 
 import type { MiniAppUser } from './auth';
-import { QUOTA_EXEMPT_CODES, type IssueStateRow } from './status';
+import type { IssueErrorCode } from './contract';
+import { FREE_FAILURE_CODES, QUOTA_EXEMPT_CODES, type IssueStateRow } from './status';
 
 export interface AppUser {
   id: number;
@@ -24,6 +25,16 @@ export interface ReadyIssueRow {
   number: number;
   createdAt: Date;
   contentJson: unknown;
+}
+
+/** A Telegram file_id is valid only for the bot that uploaded the file. */
+export interface PdfFileRef {
+  fileId: string;
+  bot: PdfBot;
+}
+
+export interface PdfIssueRow extends ReadyIssueRow {
+  pdfFile: PdfFileRef | null;
 }
 
 export interface ClaimInput {
@@ -73,8 +84,17 @@ export interface AppStore {
   latestInFlight(userId: number): Promise<IssueStateRow | undefined>;
   /** Only the user's own, non-deleted issue; `id` must already be a valid uuid. */
   getIssue(userId: number, id: string): Promise<IssueStateRow | undefined>;
-  /** The user's own ready, non-deleted issue with its content (share, PDF). */
-  getReadyIssue(userId: number, id: string): Promise<ReadyIssueRow | undefined>;
+  /** The user's own ready, non-deleted issue with its content and cached PDF (share, PDF). */
+  getReadyIssue(userId: number, id: string): Promise<PdfIssueRow | undefined>;
+  /**
+   * Takes one PDF send of the MSK `day` atomically (a new day resets the counter); false when
+   * `limit` sends were already taken that day.
+   */
+  claimPdfSend(userId: number, day: string, limit: number): Promise<boolean>;
+  /** Gives back a send taken by claimPdfSend for `day` (a failed send costs nothing). */
+  refundPdfSend(userId: number, day: string): Promise<void>;
+  /** Remembers the uploaded PDF so the next send skips rendering. */
+  savePdfFile(issueId: string, file: PdfFileRef): Promise<void>;
   /**
    * Hides the user's own ready issue for good; idempotent (a repeat call is 'deleted').
    * busy = still being built; not_found = no such issue of this user, or a failed one.
@@ -153,11 +173,18 @@ const IN_FLIGHT = ['pending', 'collecting', 'digesting', 'composing'] as const;
 // Scheduled builds never use up the user's "build now" presses.
 const manualOnly = sql`${issues.trigger} = 'manual'`;
 
-// Mirrors countsTowardQuota(): failures that spent no LLM money are free.
-const countsTowardQuota = sql`not (${issues.status} = 'failed' and split_part(coalesce(${issues.error}, ''), ':', 1) in (${sql.join(
-  QUOTA_EXEMPT_CODES.map((code) => sql`${code}`),
-  sql`, `,
-)}))`;
+const notFailedWith = (codes: readonly IssueErrorCode[]) =>
+  sql`not (${issues.status} = 'failed' and split_part(coalesce(${issues.error}, ''), ':', 1) in (${sql.join(
+    codes.map((code) => sql`${code}`),
+    sql`, `,
+  )}))`;
+
+// Built from the same constants as countsTowardQuota() / countsTowardSpend(), so they cannot drift.
+const countsTowardQuota = notFailedWith(QUOTA_EXEMPT_CODES);
+const countsTowardSpend = notFailedWith(FREE_FAILURE_CODES);
+
+// pg_advisory_xact_lock key serialising the global-cap check and the insert across all users.
+const GLOBAL_CAP_LOCK = 0x70647370;
 
 const REAPED_ERROR = 'timeout: the build was interrupted';
 
@@ -280,6 +307,8 @@ export function createAppDbStore(db: Database): AppStore {
           number: issues.number,
           createdAt: issues.createdAt,
           contentJson: issues.contentJson,
+          pdfFileId: issues.pdfFileId,
+          pdfFileBot: issues.pdfFileBot,
         })
         .from(issues)
         .where(
@@ -291,7 +320,46 @@ export function createAppDbStore(db: Database): AppStore {
           ),
         )
         .limit(1);
-      return row === undefined || row.number === null ? undefined : { ...row, number: row.number };
+      if (row === undefined || row.number === null) return undefined;
+      const { pdfFileId, pdfFileBot, ...rest } = row;
+      return {
+        ...rest,
+        number: row.number,
+        pdfFile:
+          pdfFileId !== null && pdfFileBot !== null ? { fileId: pdfFileId, bot: pdfFileBot } : null,
+      };
+    },
+
+    async claimPdfSend(userId, day, limit) {
+      // One statement: concurrent taps cannot both pass the check. SET reads the old row values.
+      const [row] = await db
+        .update(users)
+        .set({
+          pdfSendsCount: sql`case when ${users.pdfSendsDay} = ${day}::date then ${users.pdfSendsCount} + 1 else 1 end`,
+          pdfSendsDay: day,
+        })
+        .where(
+          and(
+            eq(users.id, userId),
+            sql`(${users.pdfSendsDay} is distinct from ${day}::date or ${users.pdfSendsCount} < ${limit})`,
+          ),
+        )
+        .returning({ count: users.pdfSendsCount });
+      return row !== undefined;
+    },
+
+    async refundPdfSend(userId, day) {
+      await db
+        .update(users)
+        .set({ pdfSendsCount: sql`greatest(${users.pdfSendsCount} - 1, 0)` })
+        .where(and(eq(users.id, userId), eq(users.pdfSendsDay, day)));
+    },
+
+    async savePdfFile(issueId, file) {
+      await db
+        .update(issues)
+        .set({ pdfFileId: file.fileId, pdfFileBot: file.bot })
+        .where(eq(issues.id, issueId));
     },
 
     // Deleted issues still count: deleting must not refund the daily quota.
@@ -373,11 +441,13 @@ export function createAppDbStore(db: Database): AppStore {
           if (used >= input.perUserLimit) return { kind: 'limit', used };
         }
 
-        // Approximate under concurrency across users (no global lock): a soft spend cap.
+        // Held until commit, so two users' claims cannot both see the last free global slot.
+        // Always taken after the user row lock: one lock order everywhere, no deadlock.
+        await tx.execute(sql`select pg_advisory_xact_lock(${GLOBAL_CAP_LOCK})`);
         const [global] = await tx
           .select({ value: count() })
           .from(issues)
-          .where(and(gte(issues.createdAt, input.since), countsTowardQuota));
+          .where(and(gte(issues.createdAt, input.since), countsTowardSpend));
         if ((global?.value ?? 0) >= input.globalLimit) return { kind: 'limit_global' };
 
         const [channelCount] = await tx

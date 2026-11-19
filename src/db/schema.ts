@@ -44,6 +44,9 @@ export const users = pgTable(
     schedulePausedAt: timestamp('schedule_paused_at', { withTimezone: true }),
     // Last proof the prod bot may write to the user (/start or write access); null = unknown.
     canNotifyAt: timestamp('can_notify_at', { withTimezone: true }),
+    // PDF sends on the MSK day pdf_sends_day; a new day resets the counter in the same UPDATE.
+    pdfSendsDay: date('pdf_sends_day', { mode: 'string' }),
+    pdfSendsCount: integer('pdf_sends_count').notNull().default(0),
     createdAt: createdAt(),
   },
   (table) => [
@@ -147,6 +150,10 @@ export const issueTriggers = ['manual', 'scheduled'] as const;
 
 export type IssueTrigger = (typeof issueTriggers)[number];
 
+export const pdfBots = ['prod', 'dev'] as const;
+
+export type PdfBot = (typeof pdfBots)[number];
+
 export const issues = pgTable(
   'issues',
   {
@@ -174,6 +181,9 @@ export const issues = pgTable(
     trigger: text('trigger').$type<IssueTrigger>().notNull().default('manual'),
     // First time the owner opened the issue inside the Mini App (unread auto issues pause).
     openedAt: timestamp('opened_at', { withTimezone: true }),
+    // Telegram file_id of the uploaded PDF; valid only for the bot in pdf_file_bot.
+    pdfFileId: text('pdf_file_id'),
+    pdfFileBot: text('pdf_file_bot').$type<PdfBot>(),
     createdAt: createdAt(),
   },
   (table) => [
@@ -186,6 +196,10 @@ export const issues = pgTable(
     check(
       'issues_trigger_check',
       sql.raw(`"trigger" in (${issueTriggers.map((trigger) => `'${trigger}'`).join(', ')})`),
+    ),
+    check(
+      'issues_pdf_file_bot_check',
+      sql.raw(`"pdf_file_bot" in (${pdfBots.map((bot) => `'${bot}'`).join(', ')})`),
     ),
   ],
 );

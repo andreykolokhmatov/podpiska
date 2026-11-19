@@ -1,9 +1,13 @@
-import { isValid, parse } from '@tma.js/init-data-node';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+import { parse } from '@tma.js/init-data-node';
 
 import { AUTH_SCHEME } from './contract';
 
 /** initData older than this is refused as expired (the client asks to restart the app). */
 export const INIT_DATA_MAX_AGE_S = 86_400;
+/** Clock skew tolerated for an auth_date in the future; beyond it the initData is refused. */
+export const INIT_DATA_MAX_SKEW_S = 300;
 const MAX_RAW_LENGTH = 8192;
 
 export interface MiniAppUser {
@@ -37,12 +41,28 @@ export interface VerifyOptions {
   now: Date;
 }
 
+/**
+ * Telegram's Mini App check: HMAC-SHA256 over the sorted `key=value` lines (all but `hash`),
+ * keyed by HMAC-SHA256("WebAppData", token); compared in constant time.
+ */
+const hashMatches = (params: URLSearchParams, token: string): boolean => {
+  const hashes = params.getAll('hash');
+  const hash = hashes[0];
+  if (hashes.length !== 1 || hash === undefined || !/^[0-9a-f]{64}$/i.test(hash)) return false;
+  const lines: string[] = [];
+  params.forEach((value, key) => {
+    if (key !== 'hash') lines.push(`${key}=${value}`);
+  });
+  lines.sort();
+  const secret = createHmac('sha256', 'WebAppData').update(token).digest();
+  const expected = createHmac('sha256', secret).update(lines.join('\n')).digest();
+  return timingSafeEqual(expected, Buffer.from(hash, 'hex'));
+};
+
 const signedBy = (raw: string, options: VerifyOptions): MiniAppAuth['bot'] | undefined => {
-  // Expiry is checked below against the injected clock, so the library check is off.
-  if (isValid(raw, options.prodToken, { expiresIn: 0 })) return 'prod';
-  if (options.devToken !== undefined && isValid(raw, options.devToken, { expiresIn: 0 })) {
-    return 'dev';
-  }
+  const params = new URLSearchParams(raw);
+  if (hashMatches(params, options.prodToken)) return 'prod';
+  if (options.devToken !== undefined && hashMatches(params, options.devToken)) return 'dev';
   return undefined;
 };
 
@@ -63,9 +83,10 @@ export function verifyInitData(raw: string, options: VerifyOptions): AuthResult 
   if (user === undefined || !Number.isSafeInteger(user.id) || user.id <= 0) {
     return { ok: false, error: 'unauthorized' };
   }
-  if (options.now.getTime() - data.auth_date.getTime() > INIT_DATA_MAX_AGE_S * 1000) {
-    return { ok: false, error: 'expired' };
-  }
+  const age = options.now.getTime() - data.auth_date.getTime();
+  // A signed date far in the future would outlive the 24h expiry: treat it as forged.
+  if (age < -INIT_DATA_MAX_SKEW_S * 1000) return { ok: false, error: 'unauthorized' };
+  if (age > INIT_DATA_MAX_AGE_S * 1000) return { ok: false, error: 'expired' };
   return {
     ok: true,
     auth: {

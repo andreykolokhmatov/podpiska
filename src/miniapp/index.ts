@@ -1,4 +1,4 @@
-import { Api, GrammyError, InputFile } from 'grammy';
+import { Api } from 'grammy';
 import { after } from 'next/server';
 
 import { createIssueNotifier } from '@/bot/notify';
@@ -21,7 +21,7 @@ import { applyNotifyOutcome } from '@/schedule/service';
 import { createScheduleDbStore } from '@/schedule/store';
 
 import { createAppApi, type AppApi, type AppApiDeps, type IdHandler } from './api';
-import { pdfFileName } from './pdf-link';
+import { sendIssuePdf } from './pdf-send';
 import { buildShareResult } from './share';
 import { createAppDbStore } from './store';
 
@@ -91,26 +91,17 @@ const share: AppApiDeps['share'] = async (input) => {
   return prepared.id;
 };
 
-/** Bot API answers for a user the bot may not write to: blocked (403) or never started (400). */
-const cannotMessage = (error: unknown): boolean =>
-  error instanceof GrammyError &&
-  (error.error_code === 403 ||
-    (error.error_code === 400 && /chat not found/i.test(error.description)));
-
-const sendPdf: AppApiDeps['sendPdf'] = async (input) => {
+const sendPdf: AppApiDeps['sendPdf'] = (input) => {
   const client = botClient(input.bot);
-  const pdf = await renderIssuePdf(input.issueId);
-  try {
-    await client.api.sendDocument(
-      input.telegramUserId,
-      new InputFile(pdf, pdfFileName(input.number)),
-      { caption: `Выпуск № ${input.number}` },
-    );
-  } catch (error) {
-    if (cannotMessage(error)) return 'cannot_message';
-    throw error;
-  }
-  return 'sent';
+  return sendIssuePdf(
+    {
+      render: renderIssuePdf,
+      sendDocument: (chatId, document, options) =>
+        client.api.sendDocument(chatId, document, options),
+      log,
+    },
+    input,
+  );
 };
 
 /** Built on the first request, never at import time (keeps `next build` secret-free). */

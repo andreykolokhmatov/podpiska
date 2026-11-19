@@ -31,7 +31,7 @@ import {
 import { ColorIcon } from '../components/ColorIcon';
 import { IssueCard } from '../components/IssueCard';
 import { NewspaperEmoji } from '../components/NewspaperEmoji';
-import { initials, issueUrl } from '../env';
+import { initials, issueUrl, withFromApp } from '../env';
 import { useAppearance, useBackButton, useMainButton } from '../hooks';
 import { nextIssueLine } from '../schedule';
 import { navigateFull } from '../sdk';
@@ -52,7 +52,7 @@ export function Hub({ data }: HubProps) {
   const router = useRouter();
   const appearance = useAppearance();
   const [quota, setQuota] = useState(me.quota);
-  const openIssue = (id: string) => navigateFull(issueUrl(id, appearance));
+  const openIssue = (id: string) => navigateFull(issueUrl(id, appearance, true));
   const channelCount = channels.length;
 
   const { state, start } = useIssueBuild({
@@ -83,7 +83,7 @@ export function Hub({ data }: HubProps) {
           className="pd-icon-cell"
           before={<ColorIcon icon={CalendarClock} color="orange" size={40} />}
           after={chevron}
-          onClick={() => router.push('/schedule')}
+          onClick={() => router.push(withFromApp('/schedule'))}
         >
           {nextIssueLine(me.schedule)}
         </Cell>
@@ -136,7 +136,7 @@ export function Hub({ data }: HubProps) {
               <Plus size={22} strokeWidth={2.4} />
             </span>
           }
-          onClick={() => router.push('/channels?add=1')}
+          onClick={() => router.push(withFromApp('/channels?add=1'))}
         >
           {t.hub.addChannel}
         </ButtonCell>
@@ -152,13 +152,16 @@ export function Hub({ data }: HubProps) {
               />
             }
             subtitle={`@${channel.username}`}
-            onClick={() => router.push('/channels')}
+            onClick={() => router.push(withFromApp('/channels'))}
           >
             {channel.title?.trim() || `@${channel.username}`}
           </Cell>
         ))}
         {channelCount > CHANNELS_INLINE && (
-          <ButtonCell className="pd-button-cell" onClick={() => router.push('/channels')}>
+          <ButtonCell
+            className="pd-button-cell"
+            onClick={() => router.push(withFromApp('/channels'))}
+          >
             {t.hub.showAll(channelCount)}
           </ButtonCell>
         )}
@@ -169,7 +172,7 @@ export function Hub({ data }: HubProps) {
           after={chevron}
           multiline
           subtitle={interests ? undefined : t.hub.interestsEmptyHint}
-          onClick={() => router.push('/interests')}
+          onClick={() => router.push(withFromApp('/interests'))}
         >
           {interests ? (
             <span className="pd-preview">{interests}</span>
@@ -184,7 +187,7 @@ export function Hub({ data }: HubProps) {
           className="pd-icon-cell"
           before={<ColorIcon icon={Archive} color="purple" size={40} />}
           after={chevron}
-          onClick={() => router.push('/archive')}
+          onClick={() => router.push(withFromApp('/archive'))}
         >
           {t.hub.archive}
         </Cell>

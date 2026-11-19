@@ -131,15 +131,29 @@ export async function createIssueRecord(
   return newIssueRun(deps, { ...input, issueId: issue.id, period });
 }
 
+/**
+ * Time kept for compose (one smart LLM call, with retries) before the deadline: digests stop
+ * being scheduled once less than this remains, and compose never starts with less.
+ */
+export const COMPOSE_RESERVE_MS = 60_000;
+
 export interface ExecuteOptions {
   /** Past this instant the run stops between steps (or digest tasks) as failed('timeout'). */
   deadline?: Date;
+  /** Defaults to COMPOSE_RESERVE_MS; only meaningful with a deadline. */
+  composeReserveMs?: number;
   /** false skips the "issue ready" message (the user never allowed the bot to write). */
   notifyAllowed?: boolean;
 }
 
 const pastDeadline = (deps: Pick<PipelineDeps, 'now'>, options: ExecuteOptions): boolean =>
   options.deadline !== undefined && deps.now().getTime() >= options.deadline.getTime();
+
+/** Too little time left to compose: stop digesting and fail before the smart call. */
+const pastComposeCutoff = (deps: Pick<PipelineDeps, 'now'>, options: ExecuteOptions): boolean =>
+  options.deadline !== undefined &&
+  deps.now().getTime() >=
+    options.deadline.getTime() - (options.composeReserveMs ?? COMPOSE_RESERVE_MS);
 
 const checkDeadline = (deps: Pick<PipelineDeps, 'now'>, options: ExecuteOptions): void => {
   if (pastDeadline(deps, options)) throw new DeadlineError();
@@ -206,7 +220,8 @@ export async function runDigestStep(
   // period.end precedes the collect start, so every post up to it was scraped.
   const watermark = run.period.end;
   const worker = async (): Promise<void> => {
-    while (next < tasks.length && !pastDeadline(deps, options)) {
+    // Digests finished before the cutoff are already cached, so a retry starts further along.
+    while (next < tasks.length && !pastComposeCutoff(deps, options)) {
       const task = tasks[next];
       next += 1;
       if (task === undefined) continue;
@@ -301,7 +316,7 @@ export async function executeIssueRun(
     await runCollectStep(deps, run);
     checkDeadline(deps, options);
     await runDigestStep(deps, run, options);
-    checkDeadline(deps, options);
+    if (pastComposeCutoff(deps, options)) throw new DeadlineError();
     const { number, content } = await runComposeStep(deps, run);
     result = { issueId: run.issueId, number, content, stats: run.stats };
   } catch (error) {

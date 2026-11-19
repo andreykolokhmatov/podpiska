@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   countsTowardQuota,
+  countsTowardSpend,
   errorCode,
   issueState,
   quota,
@@ -38,8 +39,8 @@ describe('quota', () => {
 });
 
 describe('countsTowardQuota', () => {
-  it.each(['no_channels: x', 'no_posts: x', 'collect_failed: x', 'no_news: x'])(
-    'excludes the free failure %s',
+  it.each(['no_channels: x', 'no_posts: x', 'collect_failed: x', 'no_news: x', 'timeout: x'])(
+    'excludes the exempt failure %s',
     (error) => {
       expect(countsTowardQuota({ status: 'failed', error })).toBe(false);
     },
@@ -47,12 +48,19 @@ describe('countsTowardQuota', () => {
 
   it.each([
     ['failed', 'digest_failed: x'],
-    ['failed', 'timeout: x'],
     ['failed', 'Payment Required'],
     ['ready', null],
     ['digesting', null],
   ] as const)('counts %s %s', (status, error) => {
     expect(countsTowardQuota({ status, error })).toBe(true);
+  });
+});
+
+describe('countsTowardSpend', () => {
+  it('counts a timeout globally (it spent digests) but not free failures', () => {
+    expect(countsTowardSpend({ status: 'failed', error: 'timeout: x' })).toBe(true);
+    expect(countsTowardSpend({ status: 'failed', error: 'no_posts: x' })).toBe(false);
+    expect(countsTowardSpend({ status: 'ready', error: null })).toBe(true);
   });
 });
 

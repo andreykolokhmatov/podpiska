@@ -8,11 +8,30 @@ export type UiPlatform = 'ios' | 'base';
 export const uiPlatform = (platform: string | undefined): UiPlatform =>
   platform === 'ios' || platform === 'macos' ? 'ios' : 'base';
 
-/** The newspaper honours ?theme, so it matches Telegram rather than the OS setting. */
-export const issueUrl = (id: string, appearance: Appearance): string =>
-  `/issue/${encodeURIComponent(id)}?tma=1&theme=${appearance}`;
+/**
+ * `?from=app` marks a page opened from inside the Mini App, so Back may step through history.
+ * history.length cannot tell: Telegram's WebView history may hold entries from before the launch.
+ */
+export const FROM_APP = 'from=app';
 
-export const privacyUrl = (appearance: Appearance): string => `/privacy?theme=${appearance}`;
+export function withFromApp(url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}${FROM_APP}`;
+}
+
+export const openedFromApp = (search: string): boolean =>
+  new URLSearchParams(search).get('from') === 'app';
+
+/**
+ * The newspaper honours ?theme, so it matches Telegram rather than the OS setting. fromApp: opened
+ * from the hub/archive (Back returns there); a start_param launch has nothing behind it.
+ */
+export const issueUrl = (id: string, appearance: Appearance, fromApp = false): string => {
+  const url = `/issue/${encodeURIComponent(id)}?tma=1&theme=${appearance}`;
+  return fromApp ? withFromApp(url) : url;
+};
+
+export const privacyUrl = (appearance: Appearance): string =>
+  withFromApp(`/privacy?theme=${appearance}`);
 
 /** sessionStorage key: the start_param already routed in this WebView session. */
 export const START_CONSUMED_KEY = 'pd/startParamConsumed';

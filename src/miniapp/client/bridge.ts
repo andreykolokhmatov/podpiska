@@ -12,18 +12,19 @@ import {
 
 import { configureApi, type FetchLike } from './api';
 import { loadDevMock, wantsDevMock } from './devMock';
+import { openedFromApp } from './env';
 import { issueIdFromPath, startIssueActions, type MountTrigger } from './issueActions';
 import { t } from './texts';
 
-/** Opened by a full page load, so history.back() returns to the Mini App screen we came from. */
+/** Opened by a full page load: from an app screen history.back() returns there, else the hub. */
 function goBack(): void {
-  if (window.history.length > 1) window.history.back();
+  if (openedFromApp(window.location.search)) window.history.back();
   // Full load on purpose: the newspaper and the (app) tree use different stylesheets.
   // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   else window.location.assign('/');
 }
 
-const POST_LINK ='.np a[href^="https://t.me/"]';
+const POST_LINK = '.np a[href^="https://t.me/"]';
 
 /** The promo plate carries the bot username (server env), so the share fallback can deep-link. */
 function promoBot(): string | null {

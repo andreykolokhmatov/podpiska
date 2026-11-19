@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useReducer } from 'react';
+import { useEffect, useEffectEvent, useReducer, useRef } from 'react';
 
 import {
   buildResponseSchema,
   issueResponseSchema,
+  meResponseSchema,
   type IssueState,
   type Quota,
 } from '@/miniapp/contract';
+import { QUOTA_EXEMPT_CODES } from '@/miniapp/status';
 
 import { apiFetch } from './api';
 import { buildReducer, initialBuildState, nextPollDelay, type BuildState } from './build';
@@ -73,8 +75,37 @@ export function useIssueBuild({ inFlight, onReady, onQuota }: UseIssueBuildOptio
     if (failed) haptic.error();
   }, [failed]);
 
+  // The quota shown was taken from the POST answer; an exempt failure gives that build back.
+  const exemptFailure =
+    state.kind === 'failed' &&
+    state.failure.source === 'issue' &&
+    QUOTA_EXEMPT_CODES.includes(state.failure.code);
+  const syncQuota = useEffectEvent((quota: Quota | null) => onQuota(quota));
+  useEffect(() => {
+    if (!exemptFailure) return;
+    let alive = true;
+    void apiFetch('/api/app/me', meResponseSchema).then((res) => {
+      if (alive && res.ok) syncQuota(res.data.quota);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [exemptFailure]);
+
+  // A double tap fires twice before the 'starting' render lands; the ref sees the first at once.
+  const posting = useRef(false);
   const start = async () => {
+    if (posting.current) return;
     if (state.kind === 'starting' || state.kind === 'polling' || state.kind === 'ready') return;
+    posting.current = true;
+    try {
+      await post();
+    } finally {
+      posting.current = false;
+    }
+  };
+
+  const post = async () => {
     haptic.impact();
     dispatch({ type: 'start' });
     const res = await apiFetch('/api/app/issues', buildResponseSchema, { method: 'POST' });

@@ -2,7 +2,9 @@ import { mskDay, mskDayRange } from '@/pipeline/day';
 
 import {
   DAILY_BUILDS,
+  FREE_FAILURE_CODES,
   issueErrorCodes,
+  QUOTA_EXEMPT_CODES,
   type IssueErrorCode,
   type IssueState,
   type IssueStatus,
@@ -22,17 +24,6 @@ const IN_FLIGHT: ReadonlySet<IssueStatus> = new Set([
 ]);
 
 export const isInFlight = (status: IssueStatus): boolean => IN_FLIGHT.has(status);
-
-/**
- * Failures that do not use up the daily quota: they cost no LLM money, or (no_news) a retry
- * would reuse the cached digests and never reach compose.
- */
-export const QUOTA_EXEMPT_CODES: readonly IssueErrorCode[] = [
-  'no_channels',
-  'no_posts',
-  'collect_failed',
-  'no_news',
-];
 
 const KNOWN_CODES: ReadonlySet<string> = new Set(issueErrorCodes);
 
@@ -95,9 +86,20 @@ export function issueState(row: IssueStateRow, now: Date): IssueState {
   };
 }
 
-/** Mirrors the SQL filter in the store's quota count. */
-export const countsTowardQuota = (row: { status: IssueStatus; error: string | null }): boolean =>
-  !(row.status === 'failed' && QUOTA_EXEMPT_CODES.includes(errorCode(row.error)));
+export { FREE_FAILURE_CODES, QUOTA_EXEMPT_CODES };
+
+type CountedRow = { status: IssueStatus; error: string | null };
+
+const isFailedWith = (row: CountedRow, codes: readonly IssueErrorCode[]): boolean =>
+  row.status === 'failed' && codes.includes(errorCode(row.error));
+
+/** Per-user manual quota; the store's SQL filter is built from the same QUOTA_EXEMPT_CODES. */
+export const countsTowardQuota = (row: CountedRow): boolean =>
+  !isFailedWith(row, QUOTA_EXEMPT_CODES);
+
+/** Global daily cap (LLM spend); the store's SQL filter is built from FREE_FAILURE_CODES. */
+export const countsTowardSpend = (row: CountedRow): boolean =>
+  !isFailedWith(row, FREE_FAILURE_CODES);
 
 /** Start of the current Moscow day: quotas reset at 00:00 MSK. */
 export const quotaDayStart = (now: Date): Date => mskDayRange(mskDay(now)).start;

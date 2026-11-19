@@ -11,6 +11,8 @@ export const INTERESTS_MAX = 500;
 export const CHANNEL_INPUT_MAX = 200;
 /** "Build now" presses per Moscow day per user (the owner has none). */
 export const DAILY_BUILDS = 3;
+/** PDF sends per Moscow day per user (the owner has none). */
+export const DAILY_PDF_SENDS = 5;
 export const ARCHIVE_PAGE_MAX = 50;
 /** Schedule frequencies: every day, every 3 days, every week. */
 export const FREQUENCIES = [1, 3, 7] as const;
@@ -47,6 +49,20 @@ export const issueErrorCodes = [
 ] as const;
 export type IssueErrorCode = (typeof issueErrorCodes)[number];
 
+/** Failures that spent no LLM money: they count toward no build limit, the global cap included. */
+export const FREE_FAILURE_CODES: readonly IssueErrorCode[] = [
+  'no_channels',
+  'no_posts',
+  'collect_failed',
+  'no_news',
+];
+
+/**
+ * Failures that do not use up the user's daily "build now" quota: the free ones, plus timeout,
+ * whose retry reuses the digests the failed run already cached. They still count globally.
+ */
+export const QUOTA_EXEMPT_CODES: readonly IssueErrorCode[] = [...FREE_FAILURE_CODES, 'timeout'];
+
 /** `error` of a non-2xx response. */
 export const apiErrorCodes = [
   // 401: missing / bad / unsigned initData; `expired` = auth_date older than 24h (restart the app).
@@ -58,6 +74,7 @@ export const apiErrorCodes = [
   // 422 interests longer than INTERESTS_MAX after cleaning.
   'too_long',
   // POST /issues: 409 busy (see issueId), 429 limit (see quota) / limit_global, 422 no_channels.
+  // POST /issues/<id>/pdf: 429 limit after DAILY_PDF_SENDS sends today (no quota field).
   'busy',
   'limit',
   'limit_global',
@@ -264,7 +281,8 @@ export const shareIssueResponseSchema = z.object({ preparedMessageId: z.string()
 export type ShareIssueResponse = z.infer<typeof shareIssueResponseSchema>;
 
 // POST /api/app/issues/<id>/pdf — no body. Renders the PDF; the bot that signed the initData
-// sends it to the user's chat with it. 404 as for share; 409 cannot_message when it may not write.
+// sends it to the user's chat with it. 404 as for share; 409 cannot_message when it may not write;
+// 429 limit after DAILY_PDF_SENDS successful sends this Moscow day (the owner has no limit).
 export const sendPdfResponseSchema = z.object({ ok: z.literal(true) });
 export type SendPdfResponse = z.infer<typeof sendPdfResponseSchema>;
 

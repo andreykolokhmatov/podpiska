@@ -7,6 +7,7 @@ import { now, seedStores, validDraft } from './__fixtures__/compose-fixtures';
 import { mockStage } from './__fixtures__/fakes';
 import { COMPOSE_PROMPT_VERSION, DIGEST_PROMPT_VERSION } from './prompts';
 import {
+  COMPOSE_RESERVE_MS,
   executeIssueRun,
   IssueFailedError,
   newIssueRun,
@@ -289,6 +290,57 @@ describe('executeIssueRun', () => {
     expect((error as Error).message).toMatch(/^timeout:/);
     expect(issues.issues.get(run.issueId)?.history).toContain('digesting');
     expect(issues.issues.get(run.issueId)?.history).not.toContain('composing');
+  });
+
+  describe('compose reserve', () => {
+    // 2 channels x 2 MSK days = 4 digest tasks; each finished task moves the clock by 50s.
+    const budgeted = async (deadlineInMs: number) => {
+      const { deps, issues, digests, smart } = setup(() => JSON.stringify(validDraft()));
+      let clock = now.getTime();
+      const timed: PipelineDeps = { ...deps, now: () => new Date(clock), digestConcurrency: 1 };
+      vi.spyOn(issues, 'progress').mockImplementation(async () => {
+        clock += 50_000;
+      });
+      const post = (id: number) => ({
+        id,
+        tgPostId: id,
+        text: `Пост ${id}`,
+        publishedAt: new Date('2026-11-14T18:00:00Z'),
+      });
+      digests.posts.set(1, [post(301)]);
+      digests.posts.set(2, [post(302)]);
+      const run = await claim(timed, issues);
+      const deadline = new Date(clock + deadlineInMs);
+      const error = await executeIssueRun(timed, run, { deadline }).catch((e: unknown) => e);
+      return { error, issues, digests, smart, run };
+    };
+
+    it('stops scheduling digests once only the reserve is left; finished ones stay cached', async () => {
+      expect(COMPOSE_RESERVE_MS).toBe(60_000);
+      // Cutoff at +120s: tasks start at 0, 50, 100; the 4th (150) is never started.
+      const { error, issues, digests, smart, run } = await budgeted(180_000);
+      expect((error as Error).message).toMatch(/^timeout:/);
+      const record = issues.issues.get(run.issueId);
+      expect(record?.status).toBe('failed');
+      expect(record?.history).not.toContain('composing');
+      expect(smart.model.doGenerateCalls).toHaveLength(0);
+      expect(digests.digests.get('1:2026-11-14')).toBeDefined();
+      expect(digests.digests.get('2:2026-11-14')).toBeDefined();
+    });
+
+    it('does not start compose with less than the reserve left', async () => {
+      // Cutoff at +170s: all 4 tasks start (last at 150) and end at 200, past the cutoff.
+      const { error, issues, smart, run } = await budgeted(230_000);
+      expect((error as Error).message).toMatch(/^timeout:/);
+      expect(issues.issues.get(run.issueId)?.history).not.toContain('composing');
+      expect(smart.model.doGenerateCalls).toHaveLength(0);
+    });
+
+    it('composes when the reserve is still there', async () => {
+      const { error, issues, run } = await budgeted(300_000);
+      expect(error).not.toBeInstanceOf(Error);
+      expect(issues.issues.get(run.issueId)?.status).toBe('ready');
+    });
   });
 
   it('skips notify when notifyAllowed is false', async () => {

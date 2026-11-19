@@ -1,6 +1,7 @@
 import { texts as botTexts } from '@/bot/texts';
 import {
   DAILY_BUILDS,
+  DAILY_PDF_SENDS,
   INTERESTS_MAX,
   type ApiErrorCode,
   type IssueErrorCode,
@@ -30,7 +31,8 @@ export const apiErrorText: Record<ClientErrorCode, string> = {
   retry_later: botTexts.retryLater,
   misconfigured: 'Сервис настроен не до конца. Попробуйте позже.',
   internal: botTexts.failure,
-  cannot_message: 'Бот не может вам написать. Откройте чат с ботом, нажмите «Старт» и попробуйте ещё раз.',
+  cannot_message:
+    'Бот не может вам написать. Откройте чат с ботом, нажмите «Старт» и попробуйте ещё раз.',
   network: 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.',
 };
 
@@ -48,7 +50,7 @@ export const issueErrorText: Record<IssueErrorCode, string> = {
   collect_failed: `Не получилось прочитать каналы: Telegram не ответил. Попробуйте позже. ${notCounted}`,
   digest_failed: 'Редакция не смогла прочитать каналы. Попробуйте ещё раз.',
   no_news: `Посты за сутки есть, но новостей среди них нет – только личные заметки, репосты или мемы. Добавьте каналы, где пишут новости. ${notCounted}`,
-  timeout: 'Сборка заняла слишком много времени. Попробуйте ещё раз.',
+  timeout: `Сборка заняла слишком много времени. Попробуйте ещё раз. ${notCounted}`,
   internal: 'Что-то пошло не так при сборке. Попробуйте ещё раз.',
 };
 
@@ -213,6 +215,7 @@ export const t = {
     errorTitle: 'Не получилось',
     shareFailed: 'Не удалось поделиться выпуском. Попробуйте ещё раз.',
     pdfFailed: 'Не удалось отправить PDF. Попробуйте ещё раз.',
+    pdfLimit: `Можно отправить до ${DAILY_PDF_SENDS} PDF в день – попробуйте завтра.`,
     pdfSentTitle: 'PDF готов',
     pdfSent: 'Бот прислал файл вам в личку.',
   },

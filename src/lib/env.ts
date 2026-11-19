@@ -245,8 +245,7 @@ export function getPromoEnv(source: EnvSource = process.env): PromoEnv {
 }
 
 const pdfEnvSchema = z.object({
-  // Keys the HMAC of PDF links; the page is rendered from APP_URL, never from the Host header.
-  TELEGRAM_BOT_TOKEN: telegramBotToken,
+  // The page is rendered from APP_URL, never from the Host header.
   APP_URL: botShape.APP_URL,
   // Local dev only: a Chrome/Chromium binary instead of the bundled @sparticuz/chromium.
   CHROME_EXECUTABLE_PATH: optionalString(),
@@ -254,7 +253,7 @@ const pdfEnvSchema = z.object({
 
 export type PdfEnv = z.infer<typeof pdfEnvSchema>;
 
-/** Validates only what PDF links and the PDF route need. */
+/** Validates only what rendering the issue PDF needs. */
 export function getPdfEnv(source: EnvSource = process.env): PdfEnv {
   const result = pdfEnvSchema.safeParse(source);
   if (!result.success) {

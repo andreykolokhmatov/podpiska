@@ -144,7 +144,7 @@ export function ArchiveScreen() {
             aria-label={editing ? t.archive.deleteLabel(issue.number) : undefined}
             disabled={deleting !== null}
             onClick={() =>
-              editing ? void remove(issue) : navigateFull(issueUrl(issue.id, appearance))
+              editing ? void remove(issue) : navigateFull(issueUrl(issue.id, appearance, true))
             }
           >
             <span className="pd-headline">{issue.headline ?? t.issueTitle(issue.number)}</span>

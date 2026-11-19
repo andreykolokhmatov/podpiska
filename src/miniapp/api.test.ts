@@ -18,13 +18,21 @@ import {
   interestsResponseSchema,
   issueResponseSchema,
   issuesResponseSchema,
+  DAILY_PDF_SENDS,
   meResponseSchema,
   sendPdfResponseSchema,
   scheduleResponseSchema,
   shareIssueResponseSchema,
 } from './contract';
-import { countsTowardQuota, isInFlight, type IssueStateRow } from './status';
-import type { AppStore, AppUser, ClaimInput, ClaimResult, ReadyIssueRow } from './store';
+import { countsTowardQuota, countsTowardSpend, isInFlight, type IssueStateRow } from './status';
+import type {
+  AppStore,
+  AppUser,
+  ClaimInput,
+  ClaimResult,
+  PdfFileRef,
+  ReadyIssueRow,
+} from './store';
 
 const PROD = '111111:prod-token';
 const DEV = '222222:dev-token';
@@ -55,6 +63,7 @@ interface IssueRow extends IssueStateRow {
   trigger: 'manual' | 'scheduled';
   periodEnd: Date;
   openedAt: Date | null;
+  pdfFile: PdfFileRef | null;
 }
 
 class FakeAppStore implements AppStore {
@@ -64,6 +73,7 @@ class FakeAppStore implements AppStore {
   claims: ClaimInput[] = [];
   getIssueCalls = 0;
   opened: string[] = [];
+  pdfSends = new Map<number, { day: string; count: number }>();
   private seq = 0;
 
   async upsertUser(
@@ -157,7 +167,23 @@ class FakeAppStore implements AppStore {
       number: row.number,
       createdAt: row.createdAt,
       contentJson: row.contentJson,
+      pdfFile: row.pdfFile,
     };
+  }
+  async claimPdfSend(userId: number, day: string, limit: number) {
+    const sends = this.pdfSends.get(userId);
+    const count = sends?.day === day ? sends.count : 0;
+    if (count >= limit) return false;
+    this.pdfSends.set(userId, { day, count: count + 1 });
+    return true;
+  }
+  async refundPdfSend(userId: number, day: string) {
+    const sends = this.pdfSends.get(userId);
+    if (sends?.day === day) sends.count = Math.max(0, sends.count - 1);
+  }
+  async savePdfFile(issueId: string, file: PdfFileRef) {
+    const row = this.issues.find((i) => i.id === issueId);
+    if (row) row.pdfFile = file;
   }
   async softDeleteIssue(userId: number, id: string) {
     const row = this.issues.find((i) => i.id === id && i.userId === userId);
@@ -183,7 +209,7 @@ class FakeAppStore implements AppStore {
     if (busy) return { kind: 'busy', issue: busy };
     const used = await this.countBuilds(input.userId, input.since);
     if (input.perUserLimit !== null && used >= input.perUserLimit) return { kind: 'limit', used };
-    const global = this.issues.filter((i) => i.createdAt >= input.since && countsTowardQuota(i));
+    const global = this.issues.filter((i) => i.createdAt >= input.since && countsTowardSpend(i));
     if (global.length >= input.globalLimit) return { kind: 'limit_global' };
     if ((await this.countChannels(input.userId)) === 0) return { kind: 'no_channels' };
     const issue = this.add(input.userId, { status: 'pending', trigger: input.trigger });
@@ -205,6 +231,7 @@ class FakeAppStore implements AppStore {
       trigger: 'manual',
       periodEnd: now,
       openedAt: null,
+      pdfFile: null,
       ...patch,
     };
     this.issues.push(row);
@@ -299,7 +326,7 @@ const setup = (
   );
   const pipeline = vi.fn(opts.pipeline ?? (() => pipelineDeps));
   const share = vi.fn<AppApiDeps['share']>(opts.share ?? (async () => 'prepared-1'));
-  const sendPdf = vi.fn<AppApiDeps['sendPdf']>(async () => 'sent');
+  const sendPdf = vi.fn<AppApiDeps['sendPdf']>(async () => ({ kind: 'sent', fileId: 'file-1' }));
   const env: MiniAppEnv = {
     TELEGRAM_BOT_TOKEN: PROD,
     TELEGRAM_DEV_BOT_TOKEN: DEV,
@@ -610,6 +637,30 @@ describe('channels', () => {
     expect(await errorOf(big)).toBe('bad_request');
   });
 
+  it('stops reading a streamed body without Content-Length at the 2KB cap', async () => {
+    const { api, addChannel } = setup();
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 100) controller.close();
+        else controller.enqueue(new Uint8Array(1024).fill(0x61));
+      },
+    });
+    const headers = new Headers({ authorization: `tma ${initData()}` });
+    const streamed = new Request('https://app.example/api/app/channels', {
+      method: 'POST',
+      headers,
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    expect(streamed.headers.get('content-length')).toBeNull();
+    const res = await api.addChannel(streamed);
+    expect(res.status).toBe(413);
+    expect(pulled).toBeLessThan(10);
+    expect(addChannel).not.toHaveBeenCalled();
+  });
+
   it('removes a subscription and answers 404 for an unknown one', async () => {
     const { api, store } = setup();
     await api.me(req('GET', '/api/app/me'));
@@ -720,6 +771,34 @@ describe('issues', () => {
       error: 'limit',
       quota: { limit: 3, used: 3, remaining: 0 },
     });
+  });
+
+  it('does not count a timed-out manual build toward the quota', async () => {
+    const { api, store } = await withChannels();
+    store.add(1, { status: 'failed', error: 'timeout: the issue took too long to build' });
+    store.add(1, { status: 'failed', error: 'timeout: the build was interrupted' });
+    store.add(1, { status: 'ready', number: 1 });
+    const res = await api.buildIssue(req('POST', '/api/app/issues'));
+    expect(res.status).toBe(202);
+    expect(buildResponseSchema.parse(await res.json()).quota).toEqual({
+      limit: 3,
+      used: 2,
+      remaining: 1,
+    });
+  });
+
+  it('answers 429 limit on the 4th build for dev-signed initData with the owner id', async () => {
+    const ctx = setup();
+    const auth = `tma ${initData({ id: OWNER, token: DEV })}`;
+    await ctx.api.me(req('GET', '/', { auth }));
+    ctx.store.channels.set(1, [channel('econnews')]);
+    for (let i = 0; i < 3; i += 1) {
+      expect((await ctx.api.buildIssue(req('POST', '/api/app/issues', { auth }))).status).toBe(202);
+      ctx.store.issues.at(-1)!.status = 'ready';
+    }
+    const fourth = await ctx.api.buildIssue(req('POST', '/api/app/issues', { auth }));
+    expect(fourth.status).toBe(429);
+    expect(await errorOf(fourth)).toBe('limit');
   });
 
   it('answers 429 limit_global, the owner included', async () => {
@@ -971,12 +1050,70 @@ describe('send pdf', () => {
       telegramUserId: 42,
       issueId: issue.id,
       number: 3,
+      cachedFileId: null,
     });
+    expect(issue.pdfFile).toEqual({ fileId: 'file-1', bot: 'prod' });
+  });
+
+  it('reuses the file_id uploaded by the same bot; another bot uploads again', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 3, pdfFile: { fileId: 'prod-file', bot: 'prod' } });
+    ctx.sendPdf.mockResolvedValueOnce({ kind: 'sent', fileId: 'prod-file' });
+    expect((await ctx.api.sendPdf(req('POST', '/'), issue.id)).status).toBe(200);
+    expect(ctx.sendPdf.mock.calls[0]?.[0].cachedFileId).toBe('prod-file');
+
+    const dev = `tma ${initData({ token: DEV })}`;
+    ctx.sendPdf.mockResolvedValueOnce({ kind: 'sent', fileId: 'dev-file' });
+    expect((await ctx.api.sendPdf(req('POST', '/', { auth: dev }), issue.id)).status).toBe(200);
+    expect(ctx.sendPdf.mock.calls[1]?.[0]).toMatchObject({ bot: 'dev', cachedFileId: null });
+    expect(issue.pdfFile).toEqual({ fileId: 'dev-file', bot: 'dev' });
+  });
+
+  it('answers 429 limit on the 6th send of the day; failed sends are refunded', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 3 });
+    ctx.sendPdf.mockResolvedValueOnce({ kind: 'cannot_message' });
+    expect((await ctx.api.sendPdf(req('POST', '/'), issue.id)).status).toBe(409);
+    ctx.sendPdf.mockRejectedValueOnce(new Error('boom'));
+    expect((await ctx.api.sendPdf(req('POST', '/'), issue.id)).status).toBe(500);
+    for (let i = 0; i < DAILY_PDF_SENDS; i += 1) {
+      expect((await ctx.api.sendPdf(req('POST', '/'), issue.id)).status).toBe(200);
+    }
+    const sixth = await ctx.api.sendPdf(req('POST', '/'), issue.id);
+    expect(sixth.status).toBe(429);
+    expect(sixth.headers.get('cache-control')).toBe('no-store');
+    expect(await sixth.json()).toEqual({ error: 'limit' });
+    expect(ctx.sendPdf).toHaveBeenCalledTimes(DAILY_PDF_SENDS + 2);
+  });
+
+  it('resets the PDF limit on a new Moscow day', async () => {
+    const ctx = setup();
+    await ctx.api.me(req('GET', '/api/app/me'));
+    const issue = ctx.store.add(1, { number: 3 });
+    ctx.store.pdfSends.set(1, { day: '2026-11-14', count: DAILY_PDF_SENDS });
+    expect((await ctx.api.sendPdf(req('POST', '/'), issue.id)).status).toBe(200);
+    expect(ctx.store.pdfSends.get(1)).toEqual({ day: '2026-11-15', count: 1 });
+  });
+
+  it('never limits the prod-signed owner; the dev-signed owner id is limited', async () => {
+    const ctx = setup();
+    const owner = `tma ${initData({ id: OWNER })}`;
+    await ctx.api.me(req('GET', '/', { auth: owner }));
+    const issue = ctx.store.add(1, { number: 3 });
+    for (let i = 0; i < DAILY_PDF_SENDS + 3; i += 1) {
+      expect((await ctx.api.sendPdf(req('POST', '/', { auth: owner }), issue.id)).status).toBe(200);
+    }
+    expect(ctx.store.pdfSends.size).toBe(0);
+    const dev = `tma ${initData({ id: OWNER, token: DEV })}`;
+    ctx.store.pdfSends.set(1, { day: '2026-11-15', count: DAILY_PDF_SENDS });
+    expect((await ctx.api.sendPdf(req('POST', '/', { auth: dev }), issue.id)).status).toBe(429);
   });
 
   it('answers 409 cannot_message when the bot may not write to the user', async () => {
     const ctx = setup();
-    ctx.sendPdf.mockResolvedValueOnce('cannot_message');
+    ctx.sendPdf.mockResolvedValueOnce({ kind: 'cannot_message' });
     await ctx.api.me(req('GET', '/api/app/me'));
     const issue = ctx.store.add(1, { number: 3 });
     const res = await ctx.api.sendPdf(req('POST', '/'), issue.id);
@@ -1033,6 +1170,28 @@ describe('schedule', () => {
       false,
       false,
     ]);
+  });
+
+  it('only me stamps can_notify: a replayed initData elsewhere never undoes an unreachable mark', async () => {
+    const { api, store } = setup();
+    await meOf(api);
+    const user = store.users.get(1)!;
+    expect(user.schedule.canNotifyAt).not.toBeNull();
+    user.schedule.canNotifyAt = null;
+    const upsert = vi.spyOn(store, 'upsertUser');
+    await api.listChannels(req('GET', '/api/app/channels'));
+    await api.putInterests(req('PUT', '/api/app/interests', { body: { interests: 'x' } }));
+    await api.getSchedule(req('GET', '/api/app/schedule'));
+    expect(upsert).not.toHaveBeenCalled();
+    expect(user.schedule.canNotifyAt).toBeNull();
+    await meOf(api);
+    expect(user.schedule.canNotifyAt).not.toBeNull();
+  });
+
+  it('creates a missing user on any route without stamping can_notify', async () => {
+    const { api, store } = setup();
+    expect((await api.listChannels(req('GET', '/api/app/channels'))).status).toBe(200);
+    expect(store.users.get(1)?.schedule.canNotifyAt).toBeNull();
   });
 
   it('stores a valid ?tz and silently ignores an invalid one', async () => {

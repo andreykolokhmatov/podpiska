@@ -252,12 +252,9 @@ describe('getPromoEnv', () => {
 });
 
 describe('getPdfEnv', () => {
-  const source = {
-    TELEGRAM_BOT_TOKEN: validSource.TELEGRAM_BOT_TOKEN,
-    APP_URL: validSource.APP_URL,
-  };
+  const source = { APP_URL: validSource.APP_URL };
 
-  it('needs the bot token and APP_URL; the Chrome path is optional', () => {
+  it('needs APP_URL; the Chrome path is optional', () => {
     const env = getPdfEnv({ ...source, APP_URL: 'https://podpiska.example.com/' });
     expect(env.APP_URL).toBe('https://podpiska.example.com');
     expect(env.CHROME_EXECUTABLE_PATH).toBeUndefined();
@@ -266,9 +263,8 @@ describe('getPdfEnv', () => {
     });
   });
 
-  it('rejects a missing token and an http APP_URL without echoing values', () => {
+  it('rejects an http APP_URL without echoing values', () => {
     const error = errorOf(() => getPdfEnv({ APP_URL: 'http://secret-host.example' }));
-    expect(error.message).toContain('TELEGRAM_BOT_TOKEN');
     expect(error.message).toContain('APP_URL');
     expect(error.message).not.toContain('secret-host');
   });

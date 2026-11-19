@@ -4,6 +4,9 @@ import {
   initials,
   issueUrl,
   looksLikeTma,
+  openedFromApp,
+  privacyUrl,
+  withFromApp,
   sessionFlagStore,
   takeStartIssue,
   uiPlatform,
@@ -23,6 +26,25 @@ describe('uiPlatform', () => {
 describe('issueUrl', () => {
   it('passes tma and theme to the newspaper', () => {
     expect(issueUrl('abc', 'dark')).toBe('/issue/abc?tma=1&theme=dark');
+  });
+
+  it('marks issues opened from the app, so Back may use history', () => {
+    expect(issueUrl('abc', 'light', true)).toBe('/issue/abc?tma=1&theme=light&from=app');
+  });
+});
+
+describe('from=app back signal', () => {
+  it('appends to bare and query URLs', () => {
+    expect(withFromApp('/archive')).toBe('/archive?from=app');
+    expect(withFromApp('/channels?add=1')).toBe('/channels?add=1&from=app');
+    expect(privacyUrl('dark')).toBe('/privacy?theme=dark&from=app');
+  });
+
+  it('only an explicit from=app counts; a launch link has none', () => {
+    expect(openedFromApp('?add=1&from=app')).toBe(true);
+    expect(openedFromApp('?tma=1&theme=dark')).toBe(false);
+    expect(openedFromApp('')).toBe(false);
+    expect(openedFromApp('?from=hub')).toBe(false);
   });
 });
 

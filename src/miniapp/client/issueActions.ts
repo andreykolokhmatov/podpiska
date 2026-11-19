@@ -118,6 +118,7 @@ export function startIssueActions(issueId: string, options: IssueActionsOptions)
     if (!alive) return;
     if (!res.ok) {
       const code = res.error.error;
+      if (code === 'limit') return showError(t.issueActions.pdfLimit);
       return showError(code === 'internal' ? t.issueActions.pdfFailed : errorText(code));
     }
     haptic.success();

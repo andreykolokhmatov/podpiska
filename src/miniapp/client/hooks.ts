@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createContext, use, useEffect, useEffectEvent } from 'react';
 
 import type { MainButtonView } from './build';
-import type { Appearance } from './env';
+import { openedFromApp, type Appearance } from './env';
 import { hideSecondaryRaw, type TmaEnv } from './sdk';
 
 export const TmaContext = createContext<TmaEnv | null>(null);
@@ -98,7 +98,7 @@ export function useMainButton(view: MainButtonView | null, onClick: () => void):
 export function useGoBack(): () => void {
   const router = useRouter();
   return () => {
-    if (window.history.length > 1) router.back();
+    if (openedFromApp(window.location.search)) router.back();
     else router.replace('/');
   };
 }

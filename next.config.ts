@@ -6,7 +6,6 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['puppeteer-core', '@sparticuz/chromium'],
   // The Brotli-packed Chromium is read from disk at runtime, so tracing cannot see it.
   outputFileTracingIncludes: {
-    '/api/issues/\\[id\\]/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
     '/api/app/issues/\\[id\\]/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
   },
   async headers() {

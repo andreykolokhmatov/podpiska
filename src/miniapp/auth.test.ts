@@ -62,6 +62,29 @@ describe('verifyInitData', () => {
     });
   });
 
+  it('rejects auth_date more than 5 minutes in the future; tolerates small skew', () => {
+    const ahead = signed(PROD, new Date(now.getTime() + 301_000));
+    expect(verifyInitData(ahead, { prodToken: PROD, now })).toEqual({
+      ok: false,
+      error: 'unauthorized',
+    });
+    const skewed = signed(PROD, new Date(now.getTime() + 120_000));
+    expect(verifyInitData(skewed, { prodToken: PROD, now }).ok).toBe(true);
+  });
+
+  it('rejects a missing, malformed or duplicated hash', () => {
+    const raw = signed();
+    const params = new URLSearchParams(raw);
+    const hash = params.get('hash') ?? '';
+    const without = new URLSearchParams(raw);
+    without.delete('hash');
+    const verify = (value: string) => verifyInitData(value, { prodToken: PROD, now }).ok;
+    expect(verify(without.toString())).toBe(false);
+    expect(verify(`${without.toString()}&hash=${hash.slice(0, 63)}`)).toBe(false);
+    expect(verify(`${raw}&hash=${hash}`)).toBe(false);
+    expect(verify(raw)).toBe(true);
+  });
+
   it('rejects signed data without a user', () => {
     const raw = sign({ query_id: 'q' }, PROD, now);
     expect(verifyInitData(raw, { prodToken: PROD, now })).toEqual({

@@ -217,6 +217,18 @@ describe('startIssueActions', () => {
     );
   });
 
+  it('PDF over the daily limit → popup names the limit', async () => {
+    backend((method) => (method === 'POST' ? [429, { error: 'limit' }] : ready));
+    startIssueActions(ID, OPTIONS);
+    await flush();
+    choose('pdf');
+    trigger.click();
+    await flush();
+    expect(sdk.popup.show).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: 'Можно отправить до 5 PDF в день – попробуйте завтра.' }),
+    );
+  });
+
   it('PDF failure → popup', async () => {
     backend((method) => (method === 'POST' ? [500, { error: 'internal' }] : ready));
     startIssueActions(ID, OPTIONS);

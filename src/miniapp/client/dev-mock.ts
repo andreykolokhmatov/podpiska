@@ -168,6 +168,7 @@ function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): Fetc
     : null;
   let polls = 0;
   let issues = scenario === 'fresh' ? [] : [...ISSUES];
+  let pdfSends = 0;
 
   const buildState = (): IssueState => {
     polls += 1;
@@ -282,7 +283,7 @@ function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): Fetc
   };
 
   function issueRoute(method: string, pathname: string): Response {
-    const match = /^\/api\/app\/issues\/([0-9a-f-]{36})(\/share|\/pdf-link)?$/.exec(pathname);
+    const match = /^\/api\/app\/issues\/([0-9a-f-]{36})(\/share|\/pdf)?$/.exec(pathname);
     const issue = issues.find((i) => i.id === match?.[1]);
     if (!match || !issue) return json(404, { error: 'not_found' });
     switch (`${method} ${match[2] ?? ''}`) {
@@ -304,11 +305,9 @@ function createBackend(scenario: Scenario, scheduleKind: ScheduleScenario): Fetc
         return json(200, { ok: true });
       case 'POST /share':
         return json(200, { preparedMessageId: 'dev-mock-prepared' });
-      case 'POST /pdf-link':
-        return json(200, {
-          url: `https://example.com/api/issues/${issue.id}/pdf?exp=0&sig=dev`,
-          fileName: `Podpiska-${issue.number}.pdf`,
-        });
+      case 'POST /pdf':
+        pdfSends += 1;
+        return pdfSends > 5 ? json(429, { error: 'limit' }) : json(200, { ok: true });
       default:
         return json(404, { error: 'not_found' });
     }
