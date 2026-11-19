@@ -30,7 +30,7 @@ export class PdfRenderError extends Error {
 /** A4 at 96 dpi: the single-column mobile layout, as the print CSS expects. */
 const A4_VIEWPORT = { width: 794, height: 1123 };
 const NAVIGATION_TIMEOUT_MS = 30_000;
-const MARGIN = '12mm';
+const MARGIN = '18mm';
 
 /** The page printed for an issue; built from APP_URL only, never from a request's Host. */
 export const issuePrintUrl = (appUrl: string, issueId: string): string =>

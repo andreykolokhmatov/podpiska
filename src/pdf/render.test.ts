@@ -50,7 +50,7 @@ describe('createPdfRenderer', () => {
     expect(page.pdf).toHaveBeenCalledWith({
       format: 'A4',
       printBackground: true,
-      margin: { top: '12mm', right: '12mm', bottom: '12mm', left: '12mm' },
+      margin: { top: '18mm', right: '18mm', bottom: '18mm', left: '18mm' },
     });
     expect(page.evaluate.mock.invocationCallOrder[0]).toBeLessThan(
       page.pdf.mock.invocationCallOrder[0] ?? 0,
