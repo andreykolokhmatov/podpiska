@@ -9,6 +9,7 @@ import {
   type ResolveChannelsResult,
   type ResolveOptions,
 } from '@/channels';
+import { avatarPath } from '@/channels/avatar';
 import { InvalidChannelError, normalizeChannel } from '@/collector';
 import { EnvError, type MiniAppEnv } from '@/lib/env';
 import { formatDateline, mskDay } from '@/pipeline/day';
@@ -398,7 +399,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       channels: rows.map((row) => ({
         username: row.username,
         title: row.title,
-        avatarUrl: row.avatarUrl,
+        avatarUrl: avatarPath(row.username, row.avatarUrl),
         available: row.isAvailable,
       })),
       limit: channelLimit(owner, env),
@@ -433,7 +434,7 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       channel: {
         username: channel.username,
         title: channel.title,
-        avatarUrl: channel.avatarUrl,
+        avatarUrl: avatarPath(channel.username, channel.avatarUrl),
         available: true,
       },
     };
@@ -482,7 +483,10 @@ export function createAppApi(deps: AppApiDeps): AppApi {
         status: found.status,
         ...(found.channel === undefined
           ? {}
-          : { title: found.channel.title, avatarUrl: found.channel.avatarUrl }),
+          : {
+              title: found.channel.title,
+              avatarUrl: avatarPath(found.channel.username, found.channel.avatarUrl),
+            }),
       };
     });
     deps.log(`[app] channels.resolve: ${countBy(results.map((result) => result.status))}`);

@@ -199,3 +199,24 @@ export async function removeUserChannel(
     .returning({ channelId: userChannels.channelId });
   return rows.length > 0;
 }
+
+/** The stored avatar URL of a known channel; undefined when we have never seen the channel. */
+export async function findChannelAvatar(
+  db: Database,
+  username: string,
+): Promise<{ avatarUrl: string | null } | undefined> {
+  const [row] = await db
+    .select({ avatarUrl: channels.avatarUrl })
+    .from(channels)
+    .where(eq(channels.username, username))
+    .limit(1);
+  return row;
+}
+
+export async function saveChannelAvatar(
+  db: Database,
+  username: string,
+  avatarUrl: string,
+): Promise<void> {
+  await db.update(channels).set({ avatarUrl }).where(eq(channels.username, username));
+}

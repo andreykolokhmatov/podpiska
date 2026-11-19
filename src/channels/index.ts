@@ -1,6 +1,7 @@
 import { WebPreviewSource } from '@/collector';
 
 export * from './add';
+export * from './avatar';
 export * from './resolve';
 export * from './store';
 

@@ -1539,8 +1539,8 @@ describe('POST /api/app/channels/resolve', () => {
     );
     expect(body).toEqual({
       results: [
-        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: 'https://cdn/x.jpg' },
-        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: 'https://cdn/x.jpg' },
+        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: '/api/avatars/econnews' },
+        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: '/api/avatars/econnews' },
         { username: 'somebot', status: 'bot' },
         { username: 't.me/+invite', status: 'private' },
         { username: 'a b', status: 'invalid' },
