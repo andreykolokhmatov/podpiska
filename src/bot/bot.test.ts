@@ -37,7 +37,11 @@ interface Call {
   payload: Record<string, unknown>;
 }
 
-const setup = (addChannel?: BotDeps['addChannel'], store: Partial<BotStore> = {}) => {
+const setup = (
+  addChannel?: BotDeps['addChannel'],
+  store: Partial<BotStore> = {},
+  setChannelTgId?: NonNullable<BotDeps['setChannelTgId']>,
+) => {
   const calls: Call[] = [];
   const fullStore: BotStore = {
     upsertUser: vi.fn(async () => ({ id: 7 })),
@@ -59,6 +63,7 @@ const setup = (addChannel?: BotDeps['addChannel'], store: Partial<BotStore> = {}
     appUrl: APP_URL,
     maxChannels: 3,
     log: (line) => lines.push(line),
+    ...(setChannelTgId ? { setChannelTgId } : {}),
   });
   const record: Transformer = async (_prev, method, payload) => {
     calls.push({ method, payload: payload as Record<string, unknown> });
@@ -81,13 +86,17 @@ const privateMessage = (message: Partial<Message>): Update =>
     },
   }) as Update;
 
-const forwardFrom = (username: string, extra: Partial<Message> = {}): Update =>
+const forwardFrom = (
+  username: string,
+  extra: Partial<Message> = {},
+  chatId = -1001754252633,
+): Update =>
   privateMessage({
     forward_origin: {
       type: 'channel',
       date: 0,
       message_id: 5,
-      chat: { id: -100, type: 'channel', title: 'Топор', username },
+      chat: { id: chatId, type: 'channel', title: 'Топор', username },
     },
     ...extra,
   });
@@ -119,6 +128,33 @@ describe('createBot', () => {
     const [reply] = replies(calls);
     expect(reply?.payload.text).toBe('Канал «Топор Live» (@toporlive) добавлен');
     expect(webAppUrl(reply)).toBe(APP_URL);
+  });
+
+  it('records the tg id of a forwarded channel after the add', async () => {
+    const setTgId = vi.fn(async () => undefined);
+    const { bot, calls } = setup(undefined, {}, setTgId);
+    await bot.handleUpdate(forwardFrom('toporlive'));
+    expect(setTgId).toHaveBeenCalledWith('toporlive', 1754252633);
+    expect(replies(calls)[0]?.payload.text).toBe('Канал «Топор Live» (@toporlive) добавлен');
+  });
+
+  it('skips the tg id when the add hit the limit or the id is not a Bot API channel id', async () => {
+    const setTgId = vi.fn(async () => undefined);
+    const limited = setup(async () => ({ status: 'limit', channel }), {}, setTgId);
+    await limited.bot.handleUpdate(forwardFrom('toporlive'));
+    const odd = setup(undefined, {}, setTgId);
+    await odd.bot.handleUpdate(forwardFrom('toporlive', {}, -100));
+    expect(setTgId).not.toHaveBeenCalled();
+  });
+
+  it('still replies when recording the tg id fails', async () => {
+    const setTgId = vi.fn(async () => {
+      throw new Error('db down');
+    });
+    const { bot, calls, lines } = setup(undefined, {}, setTgId);
+    await bot.handleUpdate(forwardFrom('toporlive'));
+    expect(replies(calls)[0]?.payload.text).toBe('Канал «Топор Live» (@toporlive) добавлен');
+    expect(lines).toEqual(['set tg_id failed: error=Error']);
   });
 
   it('says when the channel is already subscribed', async () => {

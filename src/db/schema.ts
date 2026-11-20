@@ -74,6 +74,8 @@ export const channels = pgTable(
     avatarUrl: text('avatar_url'),
     lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
     isAvailable: boolean('is_available').notNull().default(true),
+    /** Bare positive Telegram channel id (no `-100`); null until a source reveals it. */
+    tgId: bigint('tg_id', { mode: 'number' }).unique(),
   },
   (table) => [
     check('channels_username_lowercase', sql`${table.username} = lower(${table.username})`),

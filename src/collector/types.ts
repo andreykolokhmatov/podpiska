@@ -5,6 +5,8 @@ export interface ChannelInfo {
   displayUsername: string;
   title: string | null;
   avatarUrl: string | null;
+  /** Bare positive Telegram id; null/absent when the source does not reveal it. */
+  tgId?: number | null;
 }
 
 export interface ParsedPost {

@@ -1,6 +1,7 @@
 import { type Cheerio, type CheerioAPI, contains, load } from 'cheerio';
 
 import { ChannelUnavailableError, CollectorParseError } from './errors';
+import { normalizeChannelId } from './tg-id';
 import type { ChannelInfo, ParsedPost } from './types';
 
 type AnyNode = Parameters<typeof contains>[0];
@@ -120,6 +121,23 @@ function hasOwnMedia($: CheerioAPI, bubble: Selection): boolean {
     .some((el) => $(el).closest(FOREIGN_SELECTOR).length === 0);
 }
 
+/**
+ * The channel id from the first message's `data-view` (base64url JSON, `c` = `-<id>`).
+ * Undocumented t.me markup, so any surprise yields null instead of failing the collect.
+ */
+export function parseChannelTgId($: CheerioAPI): number | null {
+  const raw = $('.tgme_widget_message[data-view]').first().attr('data-view');
+  if (!raw) return null;
+  try {
+    const data: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (typeof data !== 'object' || data === null || !('c' in data)) return null;
+    const { c } = data;
+    return typeof c === 'number' && c < 0 ? normalizeChannelId(c) : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseChannelInfo($: CheerioAPI, fallbackUsername: string | null): ChannelInfo | null {
   const headerUsername = $('.tgme_channel_info_header_username a').first().text().trim();
   const displayUsername = headerUsername.replace(/^@/, '') || fallbackUsername;
@@ -140,6 +158,7 @@ function parseChannelInfo($: CheerioAPI, fallbackUsername: string | null): Chann
     displayUsername,
     title,
     avatarUrl,
+    tgId: parseChannelTgId($),
   };
 }
 

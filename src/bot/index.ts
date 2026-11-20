@@ -1,6 +1,11 @@
 import type { Bot } from 'grammy';
 
-import { addUserChannel, createChannelsDbStore, createInteractiveSource } from '@/channels';
+import {
+  addUserChannel,
+  createChannelsDbStore,
+  createInteractiveSource,
+  setChannelTgId,
+} from '@/channels';
 import { getDb } from '@/db';
 import { EnvError, getBotEnv } from '@/lib/env';
 
@@ -19,6 +24,7 @@ export function createAppBot(options: { log?: (line: string) => void } = {}): Bo
     token: env.TELEGRAM_BOT_TOKEN,
     store: createBotDbStore(db),
     addChannel: (userId, username, limit) => addUserChannel(channelDeps, userId, username, limit),
+    setChannelTgId: (username, tgId) => setChannelTgId(db, username, tgId),
     appUrl: env.APP_URL,
     maxChannels: env.MAX_CHANNELS_PER_USER,
     log: options.log ?? log,

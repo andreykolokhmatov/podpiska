@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
-import type { ChannelInfo } from '@/collector';
+import { writeTgId, type ChannelInfo } from '@/collector';
 import type { Database } from '@/db';
 import { channels, userChannels, users } from '@/db/schema';
 
@@ -8,10 +8,10 @@ import type { BulkLinkResult, ChannelsStore } from './add';
 
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
 
-/** Inserts or refreshes a scraped channel as available; returns its id. */
-async function upsertAvailable(db: Database | Tx, channel: ChannelInfo): Promise<number> {
+/** Inserts or refreshes a scraped channel as available; returns its id. Call inside a tx. */
+async function upsertAvailable(tx: Tx, channel: ChannelInfo): Promise<number> {
   // last_fetched_at is left alone: only collect knows how far the channel was scraped.
-  const [row] = await db
+  const [row] = await tx
     .insert(channels)
     .values({
       username: channel.username,
@@ -29,6 +29,7 @@ async function upsertAvailable(db: Database | Tx, channel: ChannelInfo): Promise
     })
     .returning({ id: channels.id });
   if (!row) throw new Error('failed to upsert channel');
+  await writeTgId(tx, channel.username, channel.tgId);
   return row.id;
 }
 
@@ -88,7 +89,7 @@ export function createChannelsDbStore(db: Database): ChannelsStore {
     },
 
     async upsertChannel(channel) {
-      await upsertAvailable(db, channel);
+      await db.transaction((tx) => upsertAvailable(tx, channel));
     },
 
     async linkUserChannel(userId, channel, limit) {
@@ -219,4 +220,35 @@ export async function saveChannelAvatar(
   avatarUrl: string,
 ): Promise<void> {
   await db.update(channels).set({ avatarUrl }).where(eq(channels.username, username));
+}
+
+export interface ChannelByTgId {
+  tgId: number;
+  username: string;
+  title: string | null;
+  isAvailable: boolean;
+}
+
+/** Known channels among bare tg ids (any availability). */
+export async function findChannelsByTgIds(
+  db: Database,
+  tgIds: readonly number[],
+): Promise<ChannelByTgId[]> {
+  const unique = [...new Set(tgIds)];
+  if (unique.length === 0) return [];
+  const rows = await db
+    .select({
+      tgId: channels.tgId,
+      username: channels.username,
+      title: channels.title,
+      isAvailable: channels.isAvailable,
+    })
+    .from(channels)
+    .where(inArray(channels.tgId, unique));
+  return rows.flatMap((row) => (row.tgId === null ? [] : [{ ...row, tgId: row.tgId }]));
+}
+
+/** Best-effort tg id of a known channel (see writeTgId). Unknown username → no-op. */
+export async function setChannelTgId(db: Database, username: string, tgId: number): Promise<void> {
+  await db.transaction((tx) => writeTgId(tx, username, tgId));
 }

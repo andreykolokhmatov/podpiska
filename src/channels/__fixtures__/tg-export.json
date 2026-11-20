@@ -1,0 +1,22 @@
+{
+  "about": "Here is the data you requested. Remember: Telegram is ad free, it is funded by your Telegram Premium subscriptions.",
+  "chats": {
+    "about": "This page lists all chats from this export.",
+    "list": [
+      { "name": "  Synthetic News  ", "type": "public_channel", "id": 1754252633, "messages": [] },
+      { "name": "Private Chan", "type": "private_channel", "id": 1111111111, "messages": [] },
+      { "name": "Friend", "type": "personal_chat", "id": 2222222, "messages": [] },
+      { "name": "Public Group", "type": "public_supergroup", "id": 3333333333, "messages": [] },
+      { "name": "Eco Synthetic", "type": "public_channel", "id": 2416194304, "messages": [] },
+      { "name": "Duplicate", "type": "public_channel", "id": 1754252633, "messages": [] },
+      { "name": "Bot API shaped", "type": "public_channel", "id": -1001827745282, "messages": [] },
+      { "type": "public_channel", "id": 1054950922, "messages": [] },
+      { "name": "Bad id", "type": "public_channel", "id": "nope", "messages": [] },
+      "not a chat"
+    ]
+  },
+  "left_chats": {
+    "about": "This page lists all supergroups and channels from this export that you've left.",
+    "list": [{ "name": "Left Channel", "type": "public_channel", "id": 4444444444, "messages": [] }]
+  }
+}

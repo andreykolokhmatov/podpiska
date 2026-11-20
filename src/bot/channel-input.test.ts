@@ -13,12 +13,12 @@ const entity = (source: string, part: string, type: 'mention' | 'url'): MessageE
   length: part.length,
 });
 
-const channelForward = (username?: string): Input => ({
+const channelForward = (username?: string, id = -100): Input => ({
   forward_origin: {
     type: 'channel',
     date: 0,
     message_id: 1,
-    chat: { id: -100, type: 'channel', title: 'Топор', ...(username ? { username } : {}) },
+    chat: { id, type: 'channel', title: 'Топор', ...(username ? { username } : {}) },
   },
 });
 
@@ -28,6 +28,20 @@ describe('extractChannelCandidate', () => {
       kind: 'username',
       username: 'toporlive',
     });
+  });
+
+  it('carries the bare tg id of a forwarded channel (-100 prefix stripped)', () => {
+    expect(extractChannelCandidate(channelForward('toporlive', -1001754252633))).toEqual({
+      kind: 'username',
+      username: 'toporlive',
+      tgId: 1754252633,
+    });
+  });
+
+  it('drops a chat id that is not in Bot API channel form', () => {
+    const candidate = extractChannelCandidate(channelForward('toporlive', -1754252633));
+    expect(candidate).toEqual({ kind: 'username', username: 'toporlive' });
+    expect(candidate && 'tgId' in candidate).toBe(false);
   });
 
   it('treats a forward from a channel without username as private', () => {

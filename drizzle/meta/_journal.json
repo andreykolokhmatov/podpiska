@@ -71,6 +71,13 @@
       "when": 1795114032068,
       "tag": "0009_channel_lookups",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795161150289,
+      "tag": "0010_channels_tg_id",
+      "breakpoints": true
     }
   ]
 }

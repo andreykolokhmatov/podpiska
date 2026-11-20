@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 
+import { load } from 'cheerio';
 import { describe, expect, it } from 'vitest';
 
 import { ChannelUnavailableError, CollectorParseError } from './errors';
-import { parseChannelPage, parseViews } from './parser';
+import { parseChannelPage, parseChannelTgId, parseViews } from './parser';
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`./__fixtures__/${name}.html`, import.meta.url), 'utf8');
@@ -118,6 +119,7 @@ describe('parseChannelPage on synthetic markup', () => {
       displayUsername: 'Synth_Chan',
       title: 'Synthetic Channel',
       avatarUrl: 'https://cdn4.telesco.pe/file/synthetic.jpg',
+      tgId: null,
     });
   });
 
@@ -139,5 +141,41 @@ describe('parseViews', () => {
     ['n/a', null],
   ])('%j → %s', (raw, expected) => {
     expect(parseViews(raw)).toBe(expected);
+  });
+});
+
+describe('channel tg id from data-view', () => {
+  it.each([
+    ['om1_omsk', 1054950922],
+    ['toporlive', 1754252633],
+    ['ecotopor', 2416194304],
+    ['mediacomputers', 1827745282],
+  ] as const)('%s → %d', (key, tgId) => {
+    expect(parse(key).info.tgId).toBe(tgId);
+  });
+
+  it('is null without posts', () => {
+    expect(parseChannelPage(fixture('synthetic'), 'synth_chan').info.tgId).toBeNull();
+    expect(parseChannelTgId(load(fixture('missing')))).toBeNull();
+  });
+
+  const page = (dataView: string) =>
+    load(`<div class="tgme_widget_message" data-post="a/1" data-view="${dataView}"></div>`);
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+  it.each([
+    ['not base64 json', '!!!***'],
+    ['not an object', encode(42)],
+    ['no c', encode({ p: 1 })],
+    ['c as string', encode({ c: '-1754252633' })],
+    ['positive c', encode({ c: 1754252633 })],
+    ['fractional c', encode({ c: -1.5 })],
+    ['empty', ''],
+  ])('garbage data-view (%s) → null', (_label, dataView) => {
+    expect(parseChannelTgId(page(dataView))).toBeNull();
+  });
+
+  it('reads a well-formed synthetic data-view', () => {
+    expect(parseChannelTgId(page(encode({ c: -2416194304, p: 5 })))).toBe(2416194304);
   });
 });

@@ -13,6 +13,8 @@ export interface BotDeps {
   botInfo?: UserFromGetMe;
   store: BotStore;
   addChannel: (userId: number, username: string, limit: number) => Promise<AddChannelResult>;
+  /** Records the tg id a forward revealed; best effort, never fails the reply. */
+  setChannelTgId?: (username: string, tgId: number) => Promise<void>;
   appUrl: string;
   maxChannels: number;
   log: (line: string) => void;
@@ -107,6 +109,13 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const { status, channel } = result;
+    if (status !== 'limit' && candidate.tgId !== undefined && deps.setChannelTgId) {
+      try {
+        await deps.setChannelTgId(channel.username, candidate.tgId);
+      } catch (error) {
+        deps.log(`set tg_id failed: error=${error instanceof Error ? error.name : typeof error}`);
+      }
+    }
     if (status === 'limit') {
       await ctx.reply(texts.limit(deps.maxChannels));
       return;

@@ -1,11 +1,13 @@
 import type { Message, MessageEntity } from 'grammy/types';
 
-import { InvalidChannelError, normalizeChannel } from '@/collector';
+import { InvalidChannelError, normalizeChannel, normalizeChannelId } from '@/collector';
 
 export type ChannelInputError = 'private' | 'not_channel_forward' | 'addlist';
 
 export type ChannelCandidate =
-  { kind: 'username'; username: string } | { kind: 'error'; reason: ChannelInputError };
+  /** `tgId` (bare) is known only for forwarded posts. */
+  | { kind: 'username'; username: string; tgId?: number }
+  | { kind: 'error'; reason: ChannelInputError };
 
 const ADDLIST_RE = /^(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/addlist\//i;
 
@@ -34,11 +36,16 @@ export function extractChannelCandidate(
     if (origin.type !== 'channel') return { kind: 'error', reason: 'not_channel_forward' };
     const { username } = origin.chat;
     if (username === undefined) return { kind: 'error', reason: 'private' };
+    let normalized: string;
     try {
-      return { kind: 'username', username: normalizeChannel(username) };
+      normalized = normalizeChannel(username);
     } catch {
       return { kind: 'error', reason: 'private' };
     }
+    const tgId = normalizeChannelId(origin.chat.id, { botApi: true });
+    return tgId === null
+      ? { kind: 'username', username: normalized }
+      : { kind: 'username', username: normalized, tgId };
   }
 
   const source = message.text ?? message.caption ?? '';
