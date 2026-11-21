@@ -1,6 +1,7 @@
 import { generateText, NoObjectGeneratedError, NoOutputGeneratedError, Output } from 'ai';
 
 import type { LlmStage } from '@/llm/client';
+import { withRateLimitRetry, type RateLimitRetryOptions } from '@/llm/retry';
 import { addUsage, emptyUsage, fromModelUsage, type TokenUsage } from '@/llm/usage';
 
 import { formatDateline, type Period } from './day';
@@ -29,6 +30,8 @@ export interface ComposeDeps {
   digests: Pick<DigestStore, 'getDigest'>;
   issues: Pick<IssueStore, 'getPostsMeta' | 'periodCounts'>;
   smart: LlmStage;
+  /** 429 waits never end past `retry.deadline`. */
+  retry?: RateLimitRetryOptions | undefined;
 }
 
 export interface ComposeInput {
@@ -134,24 +137,29 @@ export async function composeIssue(deps: ComposeDeps, input: ComposeInput): Prom
   while (resolved === undefined) {
     attempts += 1;
     try {
-      const result = await generateText({
-        model: deps.smart.model,
-        providerOptions: deps.smart.providerOptions,
-        ...(deps.smart.maxOutputTokens === undefined
-          ? {}
-          : { maxOutputTokens: deps.smart.maxOutputTokens }),
-        system: EDITORIAL_SYSTEM_PROMPT,
-        prompt: buildComposePrompt({
-          interests: input.interests,
-          dateline,
-          items,
-          trimmed,
-          ...(retryNote === undefined ? {} : { retryNote }),
-        }),
-        output: Output.object({ schema: issueDraftSchema }),
-        maxRetries: 2,
-        timeout: COMPOSE_TIMEOUT_MS,
+      const prompt = buildComposePrompt({
+        interests: input.interests,
+        dateline,
+        items,
+        trimmed,
+        ...(retryNote === undefined ? {} : { retryNote }),
       });
+      const result = await withRateLimitRetry(
+        () =>
+          generateText({
+            model: deps.smart.model,
+            providerOptions: deps.smart.providerOptions,
+            ...(deps.smart.maxOutputTokens === undefined
+              ? {}
+              : { maxOutputTokens: deps.smart.maxOutputTokens }),
+            system: EDITORIAL_SYSTEM_PROMPT,
+            prompt,
+            output: Output.object({ schema: issueDraftSchema }),
+            maxRetries: 2,
+            timeout: COMPOSE_TIMEOUT_MS,
+          }),
+        deps.retry,
+      );
       usage = addUsage(usage, fromModelUsage(result.usage));
       resolved = resolveIssue(result.output, index, { period: input.period, channelIds });
     } catch (error) {

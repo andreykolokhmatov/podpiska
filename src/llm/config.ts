@@ -10,6 +10,8 @@ export interface LlmConfig {
   /** Gemini-compatible proxy prefix, e.g. https://api.proxyapi.ru/google/v1beta. */
   baseURL?: string;
   models: { fast: string; smart: string };
+  /** Max parallel digest calls of one build. */
+  concurrency?: number;
 }
 
 export function llmConfigFromEnv(env: LlmEnv): LlmConfig {
@@ -21,5 +23,6 @@ export function llmConfigFromEnv(env: LlmEnv): LlmConfig {
     apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
     ...(env.LLM_BASE_URL === undefined ? {} : { baseURL: env.LLM_BASE_URL }),
     models: { fast: env.LLM_MODEL_FAST, smart: env.LLM_MODEL_SMART },
+    concurrency: env.LLM_CONCURRENCY,
   };
 }

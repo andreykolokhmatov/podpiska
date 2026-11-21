@@ -1,5 +1,6 @@
 import type { CollectResult } from '@/collector';
 import type { Llm } from '@/llm/client';
+import { LlmQuotaExhaustedError, type RateLimitRetryOptions } from '@/llm/retry';
 import { addUsage, emptyUsage, type TokenUsage } from '@/llm/usage';
 
 import { composeIssue } from './compose';
@@ -19,7 +20,7 @@ export interface PipelineDeps {
   llm: Llm;
   now: () => Date;
   log?: (line: string) => void;
-  /** Max digest LLM calls in flight. */
+  /** Max digest LLM calls in flight; defaults to llm.concurrency (LLM_CONCURRENCY), then 3. */
   digestConcurrency?: number;
   /** Called once after the issue is ready; its failure never fails the issue. */
   notify?: (notice: { issueId: string; userId: number; number: number }) => Promise<unknown>;
@@ -159,6 +160,34 @@ const checkDeadline = (deps: Pick<PipelineDeps, 'now'>, options: ExecuteOptions)
   if (pastDeadline(deps, options)) throw new DeadlineError();
 };
 
+/**
+ * Time a digest batch retried after a 429 needs: a flash-lite batch takes ~5-15s. With less
+ * left before the compose cutoff the retry would eat into the compose reserve.
+ */
+export const DIGEST_MIN_ATTEMPT_MS = 15_000;
+
+/**
+ * Time a compose retried after a 429 needs before the deadline. Half the reserve (the reserve
+ * is sized for a whole compose with its retries), never under 30s: a smart call that cannot
+ * finish in time would outlive the function (maxDuration) and leave the issue in composing.
+ */
+export const COMPOSE_MIN_ATTEMPT_MS = 30_000;
+
+const composeMinAttemptMs = (options: ExecuteOptions): number =>
+  Math.max(COMPOSE_MIN_ATTEMPT_MS, (options.composeReserveMs ?? COMPOSE_RESERVE_MS) / 2);
+
+/** 429 waits only when the retried call still fits before `deadline`. */
+const retryUntil = (
+  deps: Pick<PipelineDeps, 'now'>,
+  deadline: Date | undefined,
+  minAttemptMs: number,
+): RateLimitRetryOptions => ({ deadline, minAttemptMs, now: deps.now });
+
+const composeCutoff = (options: ExecuteOptions): Date | undefined =>
+  options.deadline === undefined
+    ? undefined
+    : new Date(options.deadline.getTime() - (options.composeReserveMs ?? COMPOSE_RESERVE_MS));
+
 export async function runCollectStep(deps: PipelineDeps, run: IssueRun): Promise<void> {
   await deps.issues.transition(run.issueId, 'pending', 'collecting');
   const channels = await deps.issues.getUserChannels(run.userId);
@@ -217,17 +246,20 @@ export async function runDigestStep(
 
   let done = 0;
   let next = 0;
+  // A spent daily quota fails every remaining call too: stop scheduling and fail the issue.
+  let quotaError: LlmQuotaExhaustedError | undefined;
+  const retry = retryUntil(deps, composeCutoff(options), DIGEST_MIN_ATTEMPT_MS);
   // period.end precedes the collect start, so every post up to it was scraped.
   const watermark = run.period.end;
   const worker = async (): Promise<void> => {
     // Digests finished before the cutoff are already cached, so a retry starts further along.
-    while (next < tasks.length && !pastComposeCutoff(deps, options)) {
+    while (next < tasks.length && quotaError === undefined && !pastComposeCutoff(deps, options)) {
       const task = tasks[next];
       next += 1;
       if (task === undefined) continue;
       try {
         const outcome = await summarizeChannelDay(
-          { store: deps.digests, fast: deps.llm.fast },
+          { store: deps.digests, fast: deps.llm.fast, retry },
           task.channel,
           task.day,
           watermark,
@@ -242,6 +274,7 @@ export async function runDigestStep(
         digests[outcome.status] += 1;
         run.stats.tokens.digest = addUsage(run.stats.tokens.digest, outcome.usage);
       } catch (error) {
+        if (error instanceof LlmQuotaExhaustedError) quotaError ??= error;
         digests.failed += 1;
         run.stats.digestErrors.push({
           channel: task.channel.username,
@@ -253,8 +286,10 @@ export async function runDigestStep(
       await deps.issues.progress(run.issueId, { digestsDone: done });
     }
   };
-  const workers = Math.max(1, Math.min(deps.digestConcurrency ?? 3, tasks.length));
+  const concurrency = deps.digestConcurrency ?? deps.llm.concurrency ?? 3;
+  const workers = Math.max(1, Math.min(concurrency, tasks.length));
   await Promise.all(Array.from({ length: workers }, () => worker()));
+  if (quotaError !== undefined) throw quotaError;
   if (done < tasks.length) throw new DeadlineError();
 
   deps.log?.(
@@ -271,10 +306,16 @@ export async function runDigestStep(
 export async function runComposeStep(
   deps: PipelineDeps,
   run: IssueRun,
+  options: ExecuteOptions = {},
 ): Promise<{ number: number; content: Issue }> {
   await deps.issues.transition(run.issueId, 'digesting', 'composing', { stats: run.stats });
   const composed = await composeIssue(
-    { digests: deps.digests, issues: deps.issues, smart: deps.llm.smart },
+    {
+      digests: deps.digests,
+      issues: deps.issues,
+      smart: deps.llm.smart,
+      retry: retryUntil(deps, options.deadline, composeMinAttemptMs(options)),
+    },
     { userId: run.userId, channels: run.channels, period: run.period, interests: run.interests },
   );
   run.stats.messages = composed.messages;
@@ -317,7 +358,7 @@ export async function executeIssueRun(
     checkDeadline(deps, options);
     await runDigestStep(deps, run, options);
     if (pastComposeCutoff(deps, options)) throw new DeadlineError();
-    const { number, content } = await runComposeStep(deps, run);
+    const { number, content } = await runComposeStep(deps, run, options);
     result = { issueId: run.issueId, number, content, stats: run.stats };
   } catch (error) {
     const message = safeMessage(error);

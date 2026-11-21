@@ -1,13 +1,16 @@
 import { APICallError } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CollectResult } from '@/collector';
 
 import { now, seedStores, validDraft } from './__fixtures__/compose-fixtures';
-import { mockStage } from './__fixtures__/fakes';
+import { mockStage, promptText, textResult } from './__fixtures__/fakes';
 import { COMPOSE_PROMPT_VERSION, DIGEST_PROMPT_VERSION } from './prompts';
 import {
+  COMPOSE_MIN_ATTEMPT_MS,
   COMPOSE_RESERVE_MS,
+  DIGEST_MIN_ATTEMPT_MS,
   executeIssueRun,
   IssueFailedError,
   newIssueRun,
@@ -394,5 +397,205 @@ describe('planIssuePeriod', () => {
     expect((await planIssuePeriod(deps, { userId: 1, maxDays: 1 })).start).toEqual(
       new Date(now.getTime() - 24 * hour),
     );
+  });
+});
+
+describe('LLM rate limits', () => {
+  const rateLimit = (quotaId: string, retryDelay = '7s') =>
+    new APICallError({
+      message: 'You exceeded your current quota.',
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/m:generateContent',
+      requestBodyValues: {},
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: {
+          code: 429,
+          message: 'You exceeded your current quota.',
+          status: 'RESOURCE_EXHAUSTED',
+          details: [
+            { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId }] },
+            { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay },
+          ],
+        },
+      }),
+      isRetryable: false,
+    });
+  const PER_DAY = 'GenerateRequestsPerDayPerProjectPerModel-FreeTier';
+  const PER_MINUTE = 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier';
+
+  /** Channels 1..n each get one post on 2026-11-14, so every channel needs a digest call. */
+  const withPosts = (
+    deps: PipelineDeps,
+    digests: ReturnType<typeof setup>['digests'],
+    n: number,
+  ) => {
+    const many = Array.from({ length: n }, (_, i) => ({
+      id: i + 1,
+      username: `ch${i + 1}`,
+      title: null,
+    }));
+    (deps.issues as ReturnType<typeof setup>['issues']).channels = many;
+    for (const channel of many) {
+      digests.posts.set(channel.id, [
+        {
+          id: 300 + channel.id,
+          tgPostId: 300 + channel.id,
+          text: `Пост ${channel.id}`,
+          publishedAt: new Date('2026-11-14T18:00:00Z'),
+        },
+      ]);
+    }
+  };
+
+  const tracked = () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const model = new MockLanguageModelV4({
+      modelId: 'fast',
+      doGenerate: async (options) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        const id = Number(/<post id="(\d+)"/.exec(promptText(options))?.[1]);
+        return textResult(
+          JSON.stringify({
+            items: [{ title: 'T', summary: 'S', importance: 3, topics: [], postIds: [id] }],
+          }),
+        );
+      },
+    });
+    return { model, max: () => maxInFlight };
+  };
+
+  it('llm.concurrency = 1 (LLM_CONCURRENCY=1) runs digests strictly one at a time', async () => {
+    const { deps, digests } = setup(() => JSON.stringify(validDraft()));
+    withPosts(deps, digests, 4);
+    const fast = tracked();
+    deps.llm = {
+      ...deps.llm,
+      fast: { model: fast.model, id: 'fast', providerOptions: {} },
+      concurrency: 1,
+    };
+    await runIssuePipeline(deps, input).catch(() => undefined);
+    expect(fast.model.doGenerateCalls.length).toBe(4);
+    expect(fast.max()).toBe(1);
+  });
+
+  it('defaults to 3 parallel digests without llm.concurrency', async () => {
+    const { deps, digests } = setup(() => JSON.stringify(validDraft()));
+    withPosts(deps, digests, 4);
+    const fast = tracked();
+    deps.llm = { ...deps.llm, fast: { model: fast.model, id: 'fast', providerOptions: {} } };
+    await runIssuePipeline(deps, input).catch(() => undefined);
+    expect(fast.max()).toBe(3);
+  });
+
+  it('a daily quota in a digest fails the issue as llm_quota and stops further calls', async () => {
+    const { deps, digests, issues, smart } = setup(() => JSON.stringify(validDraft()));
+    withPosts(deps, digests, 6);
+    deps.digestConcurrency = 1;
+    const fast = mockStage('fast', () => rateLimit(PER_DAY));
+    deps.llm = { ...deps.llm, fast: fast.stage };
+
+    const error = await runIssuePipeline(deps, input).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IssueFailedError);
+    expect((error as Error).message).toMatch(/^llm_quota:/);
+    expect([...issues.issues.values()][0]?.error).toMatch(/^llm_quota:/);
+    expect(fast.model.doGenerateCalls).toHaveLength(1);
+    expect(smart.model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it('a daily quota in compose fails the issue as llm_quota', async () => {
+    const { deps, issues, smart } = setup(() => rateLimit(PER_DAY));
+    const error = await runIssuePipeline(deps, input).catch((e: unknown) => e);
+    expect((error as Error).message).toMatch(/^llm_quota:/);
+    expect([...issues.issues.values()][0]?.error).toMatch(/^llm_quota:/);
+    expect(smart.model.doGenerateCalls).toHaveLength(1);
+  });
+
+  const claimed = async (deps: PipelineDeps, issues: ReturnType<typeof setup>['issues']) => {
+    const period = await planIssuePeriod(deps, { userId: 1, maxDays: 1 });
+    const record = await issues.create(1, period);
+    return newIssueRun(deps, { issueId: record.id, userId: 1, period, interests: null });
+  };
+
+  it('a compose 429 is not retried when the new call would not fit before the deadline', async () => {
+    expect(COMPOSE_MIN_ATTEMPT_MS).toBe(30_000);
+    const { deps, issues, smart } = setup(() => rateLimit(PER_MINUTE, '7s'));
+    const run = await claimed(deps, issues);
+    // 20s left at compose: the 7s wait fits, but 7s + 30s for the new smart call does not.
+    const started = Date.now();
+    const error = await executeIssueRun(deps, run, {
+      deadline: new Date(now.getTime() + 20_000),
+      composeReserveMs: 10_000,
+    }).catch((e: unknown) => e);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(error).toBeInstanceOf(IssueFailedError);
+    expect((error as Error).message).toContain('exceeded your current quota');
+    expect(issues.issues.get(run.issueId)?.status).toBe('failed');
+    expect(smart.model.doGenerateCalls).toHaveLength(1);
+  });
+
+  it('a digest 429 is not retried into the compose reserve', async () => {
+    expect(DIGEST_MIN_ATTEMPT_MS).toBe(15_000);
+    const { deps, digests, issues } = setup(() => JSON.stringify(validDraft()));
+    withPosts(deps, digests, 1);
+    const fast = mockStage('fast', () => rateLimit(PER_MINUTE, '7s'));
+    deps.llm = { ...deps.llm, fast: fast.stage };
+    const run = await claimed(deps, issues);
+    // Compose cutoff 20s away: 7s wait + 15s digest budget does not fit.
+    const started = Date.now();
+    await executeIssueRun(deps, run, {
+      deadline: new Date(now.getTime() + 20_000 + COMPOSE_RESERVE_MS),
+    }).catch(() => undefined);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(fast.model.doGenerateCalls).toHaveLength(1);
+    expect(run.stats.digests.failed).toBe(1);
+  });
+
+  it('a digest 429 is retried when wait + digest budget fit before the compose cutoff', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const { deps, digests, issues } = setup(() => JSON.stringify(validDraft()));
+      withPosts(deps, digests, 1);
+      let call = 0;
+      const fast = mockStage('fast', (prompt) => {
+        call += 1;
+        if (call === 1) return rateLimit(PER_MINUTE, '7s');
+        const id = Number(/<post id="(\d+)"/.exec(prompt)?.[1]);
+        return JSON.stringify({
+          items: [{ title: 'T', summary: 'S', importance: 3, topics: [], postIds: [id] }],
+        });
+      });
+      deps.llm = { ...deps.llm, fast: fast.stage };
+      const run = await claimed(deps, issues);
+      const result = executeIssueRun(deps, run, {
+        deadline: new Date(now.getTime() + 30_000 + COMPOSE_RESERVE_MS),
+      }).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(8_000);
+      await result;
+      expect(fast.model.doGenerateCalls).toHaveLength(2);
+      expect(run.stats.digests.failed).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a per-minute 429 in compose is retried after retryDelay within the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const { deps } = setup(
+        (() => {
+          let call = 0;
+          return () => (++call === 1 ? rateLimit(PER_MINUTE, '7s') : JSON.stringify(validDraft()));
+        })(),
+      );
+      const result = runIssuePipeline(deps, input);
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(result).resolves.toMatchObject({ number: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

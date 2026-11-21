@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { IssueReadyNotice, NotifyOutcome } from '@/bot/notify';
 import { EnvError, type CronEnv } from '@/lib/env';
+import { LlmQuotaExhaustedError } from '@/llm/retry';
 import type { ClaimInput, ClaimResult } from '@/miniapp/store';
 import { seedStores, validDraft } from '@/pipeline/__fixtures__/compose-fixtures';
 import { mockStage } from '@/pipeline/__fixtures__/fakes';
@@ -111,7 +112,7 @@ class FakeScheduleStore implements ScheduleStore {
   }
 }
 
-type Outcome = 'ready' | 'no_posts' | 'timeout';
+type Outcome = 'ready' | 'no_posts' | 'timeout' | 'llm_quota';
 
 const setup = (opts: { outcome?: Outcome; env?: Partial<CronEnv>; envError?: boolean } = {}) => {
   const store = new FakeScheduleStore();
@@ -129,7 +130,9 @@ const setup = (opts: { outcome?: Outcome; env?: Partial<CronEnv>; envError?: boo
       names.map((username) => ({ username, ok: true, collected: 1, inserted: 0 })),
     llm: {
       fast: mockStage('fast', () => JSON.stringify({ items: [] })).stage,
-      smart: mockStage('smart', () => JSON.stringify(validDraft())).stage,
+      smart: mockStage('smart', () =>
+        opts.outcome === 'llm_quota' ? new LlmQuotaExhaustedError() : JSON.stringify(validDraft()),
+      ).stage,
     },
     // Past the deadline from the first check: the build fails as a timeout.
     now: () => (opts.outcome === 'timeout' ? new Date(now.getTime() + HOUR) : now),
@@ -423,6 +426,15 @@ describe('run', () => {
     await capped.tasks[0]?.();
     expect(capped.store.calls).not.toContain('retrySoon');
     expect(capped.store.users.get(1)?.nextIssueAt?.toISOString()).toBe('2026-11-16T05:00:00.000Z');
+  });
+
+  it('does not retry the slot when the LLM daily quota is spent', async () => {
+    const { api, store, issues, tasks } = setup({ outcome: 'llm_quota' });
+    store.addUser(1);
+    const body = (await (await run(api)).json()) as { issueId: string };
+    await tasks[0]?.();
+    expect(issues.issues.get(body.issueId)?.error).toMatch(/^llm_quota:/);
+    expect(store.calls).not.toContain('retrySoon');
   });
 
   it('an unreachable user loses can_notify and is paused', async () => {

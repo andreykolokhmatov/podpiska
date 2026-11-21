@@ -28,6 +28,9 @@ export const SLOT_ATTEMPTS = 3;
 /** Empty-period outcomes: a retry would find nothing new, so they stay silent. */
 const SILENT: ReadonlySet<IssueErrorCode> = new Set(['no_posts', 'no_news', 'no_channels']);
 
+/** A spent daily LLM quota does not come back within the slot's hourly retries. */
+const NO_RETRY: ReadonlySet<IssueErrorCode> = new Set([...SILENT, 'llm_quota']);
+
 export interface CronApiDeps {
   /** Throws EnvError when CRON_SECRET or the bot env is invalid (→ 500, never open). */
   env: () => CronEnv;
@@ -264,7 +267,7 @@ export function createCronApi(deps: CronApiDeps): CronApi {
       } catch (error) {
         const code = errorCode(safeMessage(error));
         deps.log(`[cron] build ${issueId}: failed: ${code}`);
-        if (SILENT.has(code)) return;
+        if (NO_RETRY.has(code)) return;
         try {
           const failedAt = deps.now();
           const attempts = await deps.store.countSlotAttempts(

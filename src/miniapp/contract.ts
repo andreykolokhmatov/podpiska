@@ -57,6 +57,8 @@ export const issueErrorCodes = [
   'digest_failed',
   'no_news',
   'timeout',
+  // The LLM provider's daily quota is spent (free-tier key): retry tomorrow or change the key.
+  'llm_quota',
   'internal',
 ] as const;
 export type IssueErrorCode = (typeof issueErrorCodes)[number];
@@ -71,9 +73,14 @@ export const FREE_FAILURE_CODES: readonly IssueErrorCode[] = [
 
 /**
  * Failures that do not use up the user's daily "build now" quota: the free ones, plus timeout,
- * whose retry reuses the digests the failed run already cached. They still count globally.
+ * whose retry reuses the digests the failed run already cached, and llm_quota (not the user's
+ * fault). They still count globally.
  */
-export const QUOTA_EXEMPT_CODES: readonly IssueErrorCode[] = [...FREE_FAILURE_CODES, 'timeout'];
+export const QUOTA_EXEMPT_CODES: readonly IssueErrorCode[] = [
+  ...FREE_FAILURE_CODES,
+  'timeout',
+  'llm_quota',
+];
 
 /** `error` of a non-2xx response. */
 export const apiErrorCodes = [

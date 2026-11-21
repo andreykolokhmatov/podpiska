@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { generateText, Output } from 'ai';
 
 import type { LlmStage } from '@/llm/client';
+import { withRateLimitRetry, type RateLimitRetryOptions } from '@/llm/retry';
 import { addUsage, emptyUsage, fromModelUsage, type TokenUsage } from '@/llm/usage';
 
 import { mskDayRange } from './day';
@@ -25,6 +26,8 @@ const DIGEST_TIMEOUT_MS = 120_000;
 export interface DigestDeps {
   store: DigestStore;
   fast: LlmStage;
+  /** 429 waits never end past `retry.deadline`. */
+  retry?: RateLimitRetryOptions | undefined;
 }
 
 export interface DigestChannel {
@@ -76,21 +79,23 @@ const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, Math.round(value)));
 
 async function digestBatch(
-  fast: LlmStage,
+  { fast, retry }: Pick<DigestDeps, 'fast' | 'retry'>,
   channel: DigestChannel,
   day: string,
   batch: readonly DayPost[],
 ): Promise<{ items: DigestItem[]; usage: TokenUsage }> {
-  const result = await generateText({
-    model: fast.model,
-    providerOptions: fast.providerOptions,
-    ...(fast.maxOutputTokens === undefined ? {} : { maxOutputTokens: fast.maxOutputTokens }),
-    system: DIGEST_SYSTEM_PROMPT,
-    prompt: buildDigestPrompt(channel, day, batch),
-    output: Output.object({ schema: digestLlmSchema }),
-    maxRetries: 2,
-    timeout: DIGEST_TIMEOUT_MS,
-  });
+  const call = () =>
+    generateText({
+      model: fast.model,
+      providerOptions: fast.providerOptions,
+      ...(fast.maxOutputTokens === undefined ? {} : { maxOutputTokens: fast.maxOutputTokens }),
+      system: DIGEST_SYSTEM_PROMPT,
+      prompt: buildDigestPrompt(channel, day, batch),
+      output: Output.object({ schema: digestLlmSchema }),
+      maxRetries: 2,
+      timeout: DIGEST_TIMEOUT_MS,
+    });
+  const result = await withRateLimitRetry(call, retry);
 
   // The model may only cite posts of this batch; anything else is dropped.
   const idByTg = new Map(batch.map((post) => [post.tgPostId, post.id]));
@@ -126,7 +131,7 @@ const EMPTY: StoredDigest = { version: 1, items: [] };
  * Saved only if every batch succeeded; any failure throws and nothing is cached.
  */
 export async function summarizeChannelDay(
-  { store, fast }: DigestDeps,
+  { store, fast, retry }: DigestDeps,
   channel: DigestChannel,
   day: string,
   watermark: Date,
@@ -151,7 +156,7 @@ export async function summarizeChannelDay(
   let usage = emptyUsage();
   const items: DigestItem[] = [];
   for (const batch of batchPosts(posts)) {
-    const result = await digestBatch(fast, channel, day, batch);
+    const result = await digestBatch({ fast, retry }, channel, day, batch);
     items.push(...result.items);
     usage = addUsage(usage, result.usage);
   }

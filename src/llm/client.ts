@@ -1,7 +1,8 @@
 import { createGoogleGenerativeAI, type GoogleLanguageModelOptions } from '@ai-sdk/google';
-import type { generateText, LanguageModel } from 'ai';
+import { wrapLanguageModel, type generateText, type LanguageModel } from 'ai';
 
 import type { LlmConfig } from './config';
+import { rateLimitMiddleware } from './retry';
 
 type ProviderOptions = NonNullable<Parameters<typeof generateText>[0]['providerOptions']>;
 
@@ -16,6 +17,8 @@ export interface LlmStage {
 export interface Llm {
   fast: LlmStage;
   smart: LlmStage;
+  /** Max digest calls in flight (LLM_CONCURRENCY); the pipeline defaults it when absent. */
+  concurrency?: number;
 }
 
 // thinkingBudget: 0 is rejected (HTTP 400) by gemini-3.5-flash-lite behind ProxyAPI;
@@ -41,15 +44,19 @@ export function createLlm(config: LlmConfig, options: CreateLlmOptions = {}): Ll
     ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
+  // 429 is retried by withRateLimitRetry only (see retry.ts), never by the SDK as well.
+  const model = (id: string): LanguageModel =>
+    wrapLanguageModel({ model: google(id), middleware: rateLimitMiddleware });
   return {
+    ...(config.concurrency === undefined ? {} : { concurrency: config.concurrency }),
     fast: {
-      model: google(config.models.fast),
+      model: model(config.models.fast),
       id: config.models.fast,
       providerOptions: { google: fastOptions },
       maxOutputTokens: FAST_MAX_OUTPUT_TOKENS,
     },
     smart: {
-      model: google(config.models.smart),
+      model: model(config.models.smart),
       id: config.models.smart,
       providerOptions: { google: smartOptions },
       maxOutputTokens: SMART_MAX_OUTPUT_TOKENS,
