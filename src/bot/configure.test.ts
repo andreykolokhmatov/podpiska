@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   BotConfigError,
+  BotMismatchError,
   botStatus,
   configureBot,
+  configureExpectedBot,
   webhookUrlOf,
   type ConfigureApi,
   type StatusApi,
@@ -120,5 +122,29 @@ describe('botStatus', () => {
     expect(status.webhook.lastErrorDate).toEqual(new Date(1_800_000_000_000));
     expect(status.menuButton).toEqual({ type: 'default', url: null, ok: false });
     expect(status.hasMainWebApp).toBe(false);
+  });
+});
+
+describe('configureExpectedBot', () => {
+  const options = { appUrl: APP_URL, webhookSecret: 'secret' };
+  const withMe = (username: string) => {
+    const { api, calls } = configureApi();
+    return { api: { ...api, getMe: vi.fn(async () => ({ username }) as never) }, calls };
+  };
+
+  it('configures when the token belongs to the expected bot (@ and case ignored)', async () => {
+    const { api, calls } = withMe('My_Bot');
+    await expect(configureExpectedBot(api, '@my_bot', options)).resolves.toBe('My_Bot');
+    expect(calls).toEqual(['setWebhook', 'setMyCommands', 'setChatMenuButton']);
+  });
+
+  it('refuses another bot or an empty name without changing anything', async () => {
+    for (const expected of ['other_bot', '']) {
+      const { api, calls } = withMe('my_bot');
+      await expect(configureExpectedBot(api, expected, options)).rejects.toBeInstanceOf(
+        BotMismatchError,
+      );
+      expect(calls).toEqual([]);
+    }
   });
 });

@@ -106,3 +106,31 @@ export async function botStatus(api: StatusApi, appUrl: string): Promise<BotStat
     },
   };
 }
+
+export class BotMismatchError extends Error {
+  override readonly name = 'BotMismatchError';
+}
+
+/** `@Name` or `name` → `name`; '' when nothing usable was given. */
+export const normalizeBotUsername = (raw: string | undefined): string =>
+  (raw ?? '').trim().replace(/^@/, '').toLowerCase();
+
+/**
+ * configureBot behind a getMe guard: refuses (BotMismatchError, nothing changed) unless the
+ * token belongs to `expected`, so a stray .env never repoints another bot. Returns the username.
+ */
+export async function configureExpectedBot(
+  api: ConfigureApi & Pick<Api, 'getMe'>,
+  expected: string,
+  options: ConfigureOptions,
+): Promise<string> {
+  const want = normalizeBotUsername(expected);
+  const me = await api.getMe();
+  if (want === '' || me.username.toLowerCase() !== want) {
+    throw new BotMismatchError(
+      `token belongs to @${me.username}, expected @${want}; nothing changed`,
+    );
+  }
+  await configureBot(api, options);
+  return me.username;
+}

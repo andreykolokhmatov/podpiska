@@ -24,7 +24,8 @@
     "issue": "tsx src/pipeline/cli.ts",
     "llm:smoke": "tsx src/llm/smoke.ts",
     "bot:setup": "tsx src/bot/setup.ts",
-    "bot:dev": "tsx src/bot/dev.ts"
+    "bot:dev": "tsx src/bot/dev.ts",
+    "selfhost:check": "tsx src/setup/doctor.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.121",

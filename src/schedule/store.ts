@@ -233,3 +233,12 @@ export function createScheduleDbStore(db: Database): ScheduleStore {
     },
   };
 }
+
+/** Users whose slot is older than `before` though a run may start: the cron is not ticking. */
+export async function countOverdueSchedules(db: Database, before: Date): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(users)
+    .where(and(lte(users.nextIssueAt, before), mayRun, hasChannel));
+  return row?.n ?? 0;
+}

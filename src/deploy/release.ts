@@ -1,9 +1,8 @@
-import { pathToFileURL } from 'node:url';
-
 import { Api } from 'grammy';
 
 import { configureBot } from '@/bot/configure';
 import { runMigrations, type MigrationResult } from '@/db/migrate';
+import { isEntryPoint } from '@/lib/entry';
 import { EnvError, getReleaseEnv, parseEnv, type EnvSource } from '@/lib/env';
 
 export interface ReleaseDeps {
@@ -121,12 +120,7 @@ export async function release(deps: ReleaseDeps): Promise<number> {
   return 0;
 }
 
-const isEntryPoint = (): boolean => {
-  const entry = process.argv[1];
-  return entry !== undefined && import.meta.url === pathToFileURL(entry).href;
-};
-
-if (isEntryPoint()) {
+if (isEntryPoint(import.meta.url)) {
   release({
     env: process.env,
     migrate: (url) => runMigrations({ url, warn: (line) => console.error(line) }),
