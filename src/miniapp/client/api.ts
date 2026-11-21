@@ -2,6 +2,7 @@ import type { z } from 'zod';
 
 import { apiErrorSchema, AUTH_SCHEME, type ApiError } from '@/miniapp/contract';
 
+import { privateInstanceStore } from './privateInstance';
 import type { ClientErrorCode } from './texts';
 
 export type ClientError = Omit<ApiError, 'error'> & { error: ClientErrorCode };
@@ -56,6 +57,7 @@ export async function apiFetch<T>(
       : { ok: false, status: res.status, error: { error: 'internal' } };
   }
   const parsed = apiErrorSchema.safeParse(json);
+  if (parsed.success && parsed.data.error === 'private_instance') privateInstanceStore.mark();
   return {
     ok: false,
     status: res.status,

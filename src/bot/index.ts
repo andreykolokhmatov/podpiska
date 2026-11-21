@@ -7,7 +7,7 @@ import {
   setChannelTgId,
 } from '@/channels';
 import { getDb } from '@/db';
-import { EnvError, getBotEnv } from '@/lib/env';
+import { EnvError, getAccessPolicy, getBotEnv, isAllowedUser } from '@/lib/env';
 
 import { createBot } from './bot';
 import { createBotDbStore } from './store';
@@ -18,6 +18,7 @@ const log = (line: string): void => console.log(line);
 /** Wires the bot to the real database and t.me; used by the webhook and `pnpm bot:dev`. */
 export function createAppBot(options: { log?: (line: string) => void } = {}): Bot {
   const env = getBotEnv();
+  const access = getAccessPolicy();
   const db = getDb();
   const channelDeps = { store: createChannelsDbStore(db), source: createInteractiveSource() };
   return createBot({
@@ -25,6 +26,7 @@ export function createAppBot(options: { log?: (line: string) => void } = {}): Bo
     store: createBotDbStore(db),
     addChannel: (userId, username, limit) => addUserChannel(channelDeps, userId, username, limit),
     setChannelTgId: (username, tgId) => setChannelTgId(db, username, tgId),
+    isAllowed: (telegramUserId) => isAllowedUser(access, telegramUserId),
     appUrl: env.APP_URL,
     maxChannels: env.MAX_CHANNELS_PER_USER,
     log: options.log ?? log,

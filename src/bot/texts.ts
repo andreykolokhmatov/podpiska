@@ -4,6 +4,8 @@ const TITLE_MAX = 100;
 export const truncateTitle = (title: string): string =>
   title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title;
 
+export const SOURCE_URL = 'https://github.com/andreykolokhmatov/podpiska';
+
 const channelLabel = (username: string, title: string | null): string =>
   title === null || title.trim() === ''
     ? `@${username}`
@@ -28,6 +30,7 @@ export const texts = {
   invalid: 'Не получилось разобрать адрес канала. Пришлите ссылку вида t.me/username.',
   retryLater: 'Telegram сейчас не отвечает. Попробуйте позже.',
   failure: 'Что-то пошло не так, попробуйте позже.',
+  privateInstance: `Это частный экземпляр Подписки – пользоваться им может только его владелец.\n\nПоднять свою Подписку: ${SOURCE_URL}`,
   issueReady: (number: number) => `📰 Выпуск № ${number} готов`,
   openIssue: 'Читать выпуск',
   schedulePaused: 'Мы приостановили газету – включить снова?',

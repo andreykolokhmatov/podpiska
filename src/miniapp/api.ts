@@ -11,7 +11,7 @@ import {
 } from '@/channels';
 import { avatarPath } from '@/channels/avatar';
 import { InvalidChannelError, normalizeChannel } from '@/collector';
-import { EnvError, type MiniAppEnv } from '@/lib/env';
+import { accessPolicyOf, EnvError, type MiniAppEnv } from '@/lib/env';
 import { formatDateline, mskDay } from '@/pipeline/day';
 import { safeMessage } from '@/pipeline/errors';
 import { executeIssueRun, newIssueRun, planIssuePeriod, type PipelineDeps } from '@/pipeline/run';
@@ -19,7 +19,7 @@ import { ensureActive, mayActivate, slotAfterIssue, zoneOf } from '@/schedule/se
 import type { ScheduleStore, ScheduleUser } from '@/schedule/store';
 import { isValidTimeZone } from '@/schedule/time';
 
-import { isOwner, parseAuthHeader, verifyInitData, type MiniAppAuth } from './auth';
+import { isAllowed, isOwner, parseAuthHeader, verifyInitData, type MiniAppAuth } from './auth';
 import type { PdfSendResult } from './pdf-send';
 import {
   addChannelRequestSchema,
@@ -306,7 +306,8 @@ export function createAppApi(deps: AppApiDeps): AppApi {
     owner: boolean;
   }
 
-  const verify = (req: Request) => {
+  /** `gate: false` only for reads that never write and answer strangers like any non-owner. */
+  const verify = (req: Request, { gate = true }: { gate?: boolean } = {}) => {
     const env = deps.env();
     const raw = parseAuthHeader(req.headers.get('authorization'));
     if (raw === undefined) throw fail(401, 'unauthorized');
@@ -316,6 +317,8 @@ export function createAppApi(deps: AppApiDeps): AppApi {
       now: deps.now(),
     });
     if (!result.ok) throw fail(401, result.error);
+    // Before any store access: a stranger on a private instance leaves no trace in the DB.
+    if (gate && !isAllowed(result.auth, accessPolicyOf(env))) throw fail(403, 'private_instance');
     return { auth: result.auth, env };
   };
 
@@ -649,8 +652,10 @@ export function createAppApi(deps: AppApiDeps): AppApi {
   });
 
   // Also the owner check on a shared newspaper: verifies initData without registering the reader.
+  // Not gated on a private instance: a shared card opens for anyone (/issue/<uuid> is public),
+  // and a stranger has no user row, so this only ever answers 404 to them, writing nothing.
   const getIssue = route('issues.get', async (req, id: string) => {
-    const { auth } = verify(req);
+    const { auth } = verify(req, { gate: false });
     if (!uuidSchema.safeParse(id).success) throw fail(404, 'not_found');
     const user = await deps.store.findUser(auth.user.id);
     if (user === undefined) throw fail(404, 'not_found');

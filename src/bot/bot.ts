@@ -15,6 +15,8 @@ export interface BotDeps {
   addChannel: (userId: number, username: string, limit: number) => Promise<AddChannelResult>;
   /** Records the tg id a forward revealed; best effort, never fails the reply. */
   setChannelTgId?: (username: string, tgId: number) => Promise<void>;
+  /** The instance gate (PUBLIC / OWNER_TELEGRAM_ID ∪ ALLOWED_TELEGRAM_IDS) by Telegram user id. */
+  isAllowed: (telegramUserId: number) => boolean;
   appUrl: string;
   maxChannels: number;
   log: (line: string) => void;
@@ -80,7 +82,18 @@ export function createBot(deps: BotDeps): Bot {
   bot.catch(logError);
   const chat = bot.errorBoundary(replyFailure).chatType('private');
 
+  // Strangers on a private instance get the notice and nothing else: no user row, no channels.
+  const refuseStranger = async (ctx: {
+    from: { id: number };
+    reply: (text: string) => Promise<unknown>;
+  }) => {
+    if (deps.isAllowed(ctx.from.id)) return false;
+    await ctx.reply(texts.privateInstance);
+    return true;
+  };
+
   chat.command('start', async (ctx) => {
+    if (await refuseStranger(ctx)) return;
     await deps.store.upsertUser(ctx.from);
     await ctx.reply(texts.welcome, { reply_markup: openApp() });
   });
@@ -88,6 +101,7 @@ export function createBot(deps: BotDeps): Bot {
   chat.on('message', async (ctx) => {
     const groupId = ctx.message.media_group_id;
     if (groupId !== undefined && !firstOfAlbum(groupId)) return;
+    if (await refuseStranger(ctx)) return;
 
     const user = await deps.store.upsertUser(ctx.from);
     const candidate = extractChannelCandidate(ctx.message);

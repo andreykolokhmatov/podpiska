@@ -1,10 +1,12 @@
 'use client';
 
 import { AppRoot } from '@telegram-apps/telegram-ui';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 
 import { TmaContext, useAppearance } from './hooks';
+import { privateInstanceStore } from './privateInstance';
 import { OutsideTelegram } from './screens/OutsideTelegram';
+import { PrivateInstance } from './screens/PrivateInstance';
 import { initTmaOnce, navigateFull, type TmaEnv } from './sdk';
 
 interface TmaRootProps {
@@ -63,13 +65,18 @@ export function TmaRoot({ children }: TmaRootProps) {
 
 function TmaApp({ env, children }: { env: TmaEnv; children: ReactNode }) {
   const appearance = useAppearance();
+  const isPrivate = useSyncExternalStore(
+    privateInstanceStore.subscribe,
+    privateInstanceStore.get,
+    () => false,
+  );
   return (
     <AppRoot
       appearance={appearance}
       platform={env.platform}
       className={`pd-root pd-root--${env.platform}`}
     >
-      <TmaContext value={env}>{children}</TmaContext>
+      <TmaContext value={env}>{isPrivate ? <PrivateInstance /> : children}</TmaContext>
     </AppRoot>
   );
 }

@@ -1,3 +1,8 @@
+# Backup trigger for scheduled issues. The primary one is an external hourly job
+# (e.g. cron-job.org) that POSTs /api/cron/tick; GitHub's cron is best-effort and often
+# drops runs. Forks never run `schedule` workflows, and GitHub disables schedules after
+# 60 days without repository activity. Without the CRON_SECRET and APP_URL repository
+# secrets the job is a no-op (notice, exit 0).
 name: Schedule tick
 
 on:
@@ -26,8 +31,8 @@ jobs:
           CRON_SECRET="$(printf '%s' "${CRON_SECRET}" | tr -d '[:space:]')"
           APP_URL="$(printf '%s' "${APP_URL}" | tr -d '[:space:]')"
           if [ -z "${CRON_SECRET}" ] || [ -z "${APP_URL}" ]; then
-            echo "::error::Repository secrets CRON_SECRET and APP_URL must be set"
-            exit 1
+            echo "::notice::CRON_SECRET or APP_URL repository secret is not set; skipping tick"
+            exit 0
           fi
           # On 401 the server answers with the first 8 hex chars of its secret's SHA-256: compare.
           echo "local secret fingerprint: $(printf '%s' "${CRON_SECRET}" | sha256sum | cut -c1-8)"

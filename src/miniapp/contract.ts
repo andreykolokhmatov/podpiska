@@ -100,6 +100,9 @@ export const apiErrorCodes = [
   'retry_later',
   // POST /channels/resolve, 429: daily t.me lookup quota (MAX_CHANNEL_LOOKUPS_PER_DAY) used up.
   'lookup_limit',
+  // 403 on every /api/app/* route: a private instance (no PUBLIC=1) and the Telegram user is
+  // neither OWNER_TELEGRAM_ID nor in ALLOWED_TELEGRAM_IDS.
+  'private_instance',
   // 409: the bot may not write to the user (never started or blocked)
   'cannot_message',
   // 500

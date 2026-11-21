@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { DAILY_CHANNEL_LOOKUPS } from '@/miniapp/contract';
 
+import { createHmac } from 'node:crypto';
+
 import {
+  accessPolicyOf,
+  getAccessPolicy,
   getCronEnv,
   EnvError,
   getBotEnv,
@@ -11,7 +15,11 @@ import {
   getMiniAppEnv,
   getPdfEnv,
   getPromoEnv,
+  getReleaseEnv,
+  isAllowedUser,
   parseEnv,
+  parsePrivacyContact,
+  resolveDerivedEnv,
 } from './env';
 
 const validSource = {
@@ -20,6 +28,7 @@ const validSource = {
   TELEGRAM_WEBHOOK_SECRET: 'webhook_secret-123',
   APP_URL: 'https://podpiska.example.com',
   GOOGLE_GENERATIVE_AI_API_KEY: 'google-key',
+  OWNER_TELEGRAM_ID: '12345',
 };
 
 const without = (key: keyof typeof validSource): Record<string, string> =>
@@ -296,12 +305,203 @@ describe('getCronEnv', () => {
     expect(env.MAX_BUILDS_PER_DAY_GLOBAL).toBe(30);
   });
 
-  it.each([undefined, '', '   ', 'short-secret'])(
-    'refuses a missing, empty or short secret without echoing it (%s)',
+  it('refuses a short explicit secret without echoing it', () => {
+    const error = errorOf(() => getCronEnv({ ...source, CRON_SECRET: 'short-secret' }));
+    expect(error.message).toContain('CRON_SECRET');
+    expect(error.message).not.toContain('short-secret');
+  });
+
+  it.each([undefined, '', '   '])(
+    'derives a missing or empty secret from the token (%j)',
     (value) => {
-      const error = errorOf(() => getCronEnv({ ...source, CRON_SECRET: value }));
-      expect(error.message).toContain('CRON_SECRET');
-      if (value !== undefined && value.trim() !== '') expect(error.message).not.toContain(value);
+      const env = getCronEnv({ ...source, CRON_SECRET: value });
+      expect(env.CRON_SECRET).toMatch(/^[0-9a-f]{64}$/);
     },
   );
+
+  it('refuses a missing secret when there is no token to derive it from', () => {
+    const error = errorOf(() =>
+      getCronEnv({ APP_URL: validSource.APP_URL, CRON_SECRET: undefined }),
+    );
+    expect(error.message).toContain('CRON_SECRET');
+    expect(error.message).toContain('TELEGRAM_BOT_TOKEN');
+  });
+});
+
+describe('resolveDerivedEnv', () => {
+  const token = validSource.TELEGRAM_BOT_TOKEN;
+  const hmac = (purpose: string) => createHmac('sha256', token).update(purpose).digest('hex');
+
+  it('derives APP_URL from the Vercel production domain and secrets from the token', () => {
+    const out = resolveDerivedEnv({
+      TELEGRAM_BOT_TOKEN: token,
+      VERCEL_PROJECT_PRODUCTION_URL: 'podpiska-fork.vercel.app',
+    });
+    expect(out.APP_URL).toBe('https://podpiska-fork.vercel.app');
+    expect(out.TELEGRAM_WEBHOOK_SECRET).toBe(hmac('podpiska/webhook-secret/v1'));
+    expect(out.CRON_SECRET).toBe(hmac('podpiska/cron-secret/v1'));
+    expect(out.TELEGRAM_WEBHOOK_SECRET).not.toBe(out.CRON_SECRET);
+  });
+
+  it('is deterministic and differs per token', () => {
+    const a = resolveDerivedEnv({ TELEGRAM_BOT_TOKEN: token });
+    const b = resolveDerivedEnv({ TELEGRAM_BOT_TOKEN: token });
+    const c = resolveDerivedEnv({ TELEGRAM_BOT_TOKEN: '987:other' });
+    expect(a).toEqual(b);
+    expect(c.CRON_SECRET).not.toBe(a.CRON_SECRET);
+  });
+
+  it('lets explicit values win and treats empty strings as unset', () => {
+    const explicit = resolveDerivedEnv({
+      TELEGRAM_BOT_TOKEN: token,
+      VERCEL_PROJECT_PRODUCTION_URL: 'other.vercel.app',
+      APP_URL: 'https://podpiska.example.com',
+      TELEGRAM_WEBHOOK_SECRET: 'explicit_webhook',
+      CRON_SECRET: 'x'.repeat(40),
+    });
+    expect(explicit.APP_URL).toBe('https://podpiska.example.com');
+    expect(explicit.TELEGRAM_WEBHOOK_SECRET).toBe('explicit_webhook');
+    expect(explicit.CRON_SECRET).toBe('x'.repeat(40));
+
+    const empty = resolveDerivedEnv({
+      TELEGRAM_BOT_TOKEN: token,
+      VERCEL_PROJECT_PRODUCTION_URL: 'fork.vercel.app',
+      APP_URL: '',
+      TELEGRAM_WEBHOOK_SECRET: ' ',
+      CRON_SECRET: '',
+    });
+    expect(empty.APP_URL).toBe('https://fork.vercel.app');
+    expect(empty.TELEGRAM_WEBHOOK_SECRET).toBe(hmac('podpiska/webhook-secret/v1'));
+    expect(empty.CRON_SECRET).toBe(hmac('podpiska/cron-secret/v1'));
+  });
+
+  it('derives nothing from a missing or malformed token', () => {
+    expect(resolveDerivedEnv({}).CRON_SECRET).toBeUndefined();
+    expect(
+      resolveDerivedEnv({ TELEGRAM_BOT_TOKEN: 'bad' }).TELEGRAM_WEBHOOK_SECRET,
+    ).toBeUndefined();
+  });
+
+  it('derived secrets pass the webhook regex and the cron minimum', () => {
+    const env = getBotEnv({ TELEGRAM_BOT_TOKEN: token, APP_URL: validSource.APP_URL });
+    expect(env.TELEGRAM_WEBHOOK_SECRET).toMatch(/^[A-Za-z0-9_-]{1,256}$/);
+    const cron = getCronEnv({ TELEGRAM_BOT_TOKEN: token, APP_URL: validSource.APP_URL });
+    expect(cron.CRON_SECRET.length).toBeGreaterThanOrEqual(32);
+  });
+
+  it('still requires APP_URL outside Vercel, without echoing values', () => {
+    const error = errorOf(() => getBotEnv({ TELEGRAM_BOT_TOKEN: token }));
+    expect(error.message).toContain('APP_URL: is required');
+    expect(error.message).not.toContain(token);
+  });
+
+  it('feeds parseEnv, which then needs only the three self-host values and a database', () => {
+    const env = parseEnv({
+      DATABASE_URL: validSource.DATABASE_URL,
+      TELEGRAM_BOT_TOKEN: token,
+      GOOGLE_GENERATIVE_AI_API_KEY: 'google-key',
+      OWNER_TELEGRAM_ID: '42',
+      VERCEL_PROJECT_PRODUCTION_URL: 'fork.vercel.app',
+    });
+    expect(env.APP_URL).toBe('https://fork.vercel.app');
+    expect(env.CRON_SECRET).toBe(hmac('podpiska/cron-secret/v1'));
+    expect(env.LLM_CONCURRENCY).toBe(3);
+    expect(env.PUBLIC).toBe(false);
+  });
+});
+
+describe('access policy', () => {
+  it('requires the owner on a private instance, with the @userinfobot hint', () => {
+    const error = errorOf(() => parseEnv({ ...validSource, OWNER_TELEGRAM_ID: undefined }));
+    expect(error.message).toContain('OWNER_TELEGRAM_ID');
+    expect(error.message).toContain('@userinfobot');
+    expect(() => getAccessPolicy({})).toThrow(EnvError);
+  });
+
+  it('opens a public instance to everyone without an owner', () => {
+    const policy = getAccessPolicy({ PUBLIC: '1' });
+    expect(isAllowedUser(policy, 999)).toBe(true);
+    expect(parseEnv({ ...validSource, OWNER_TELEGRAM_ID: '', PUBLIC: 'true' }).PUBLIC).toBe(true);
+  });
+
+  it('admits only the owner and the allowlist on a private instance', () => {
+    const policy = getAccessPolicy({ OWNER_TELEGRAM_ID: '1', ALLOWED_TELEGRAM_IDS: ' 2, 3;4 ' });
+    expect([1, 2, 3, 4, 5].map((id) => isAllowedUser(policy, id))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+    expect(getAccessPolicy({ OWNER_TELEGRAM_ID: '1', PUBLIC: 'off' }).public).toBe(false);
+  });
+
+  it.each(['abc', '1,-2', '1,2.5', '9'.repeat(20)])('rejects ALLOWED_TELEGRAM_IDS %j', (value) => {
+    const error = errorOf(() =>
+      getAccessPolicy({ OWNER_TELEGRAM_ID: '1', ALLOWED_TELEGRAM_IDS: value }),
+    );
+    expect(error.message).toContain('ALLOWED_TELEGRAM_IDS');
+    expect(error.message).not.toContain(value);
+  });
+
+  it('rejects a PUBLIC value that is not a flag', () => {
+    const error = errorOf(() => getAccessPolicy({ PUBLIC: 'maybe' }));
+    expect(error.message).toContain('PUBLIC');
+  });
+
+  it('accessPolicyOf reports a missing owner as EnvError', () => {
+    const env = getMiniAppEnv({ TELEGRAM_BOT_TOKEN: validSource.TELEGRAM_BOT_TOKEN });
+    expect(() => accessPolicyOf(env)).toThrow(/OWNER_TELEGRAM_ID/);
+  });
+});
+
+describe('new optional settings', () => {
+  it('parses LLM_CONCURRENCY in 1..10 with default 3', () => {
+    const key = { GOOGLE_GENERATIVE_AI_API_KEY: 'k' };
+    expect(getLlmEnv(key).LLM_CONCURRENCY).toBe(3);
+    expect(getLlmEnv({ ...key, LLM_CONCURRENCY: '1' }).LLM_CONCURRENCY).toBe(1);
+    for (const bad of ['0', '11', 'x']) {
+      expect(errorOf(() => getLlmEnv({ ...key, LLM_CONCURRENCY: bad })).message).toContain(
+        'LLM_CONCURRENCY',
+      );
+    }
+  });
+
+  it('parses SKIP_DB_MIGRATE and PODPISKA_CREDIT flags', () => {
+    expect(getReleaseEnv({}).SKIP_DB_MIGRATE).toBe(false);
+    expect(getReleaseEnv({ SKIP_DB_MIGRATE: '1', VERCEL_ENV: 'production' })).toEqual({
+      SKIP_DB_MIGRATE: true,
+      VERCEL_ENV: 'production',
+    });
+    expect(getPromoEnv({}).PODPISKA_CREDIT).toBe(true);
+    expect(getPromoEnv({ PODPISKA_CREDIT: 'off' }).PODPISKA_CREDIT).toBe(false);
+    expect(errorOf(() => getPromoEnv({ PODPISKA_CREDIT: 'nah' })).message).toContain(
+      'PODPISKA_CREDIT',
+    );
+  });
+
+  it('validates PRIVACY_CONTACT in parseEnv without echoing it', () => {
+    expect(parseEnv({ ...validSource, PRIVACY_CONTACT: '@someone' }).PRIVACY_CONTACT).toBe(
+      '@someone',
+    );
+    const error = errorOf(() => parseEnv({ ...validSource, PRIVACY_CONTACT: 'javascript:x' }));
+    expect(error.message).toContain('PRIVACY_CONTACT');
+    expect(error.message).not.toContain('javascript:x');
+  });
+});
+
+describe('parsePrivacyContact', () => {
+  it.each([
+    ['andrei_working', '@andrei_working', 'https://t.me/andrei_working'],
+    ['@andrei_working', '@andrei_working', 'https://t.me/andrei_working'],
+    ['https://t.me/andrei_working', '@andrei_working', 'https://t.me/andrei_working'],
+    ['me@example.com', 'me@example.com', 'mailto:me@example.com'],
+    ['https://example.com/contact', 'https://example.com/contact', 'https://example.com/contact'],
+  ])('%s → link', (raw, label, href) => {
+    expect(parsePrivacyContact(raw)).toEqual({ label, href });
+  });
+
+  it.each(['javascript:alert(1)', 'http://example.com', 'a b', '@ab'])('rejects %j', (raw) => {
+    expect(parsePrivacyContact(raw)).toBeNull();
+  });
 });

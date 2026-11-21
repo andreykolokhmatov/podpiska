@@ -41,6 +41,7 @@ const setup = (
   addChannel?: BotDeps['addChannel'],
   store: Partial<BotStore> = {},
   setChannelTgId?: NonNullable<BotDeps['setChannelTgId']>,
+  isAllowed: BotDeps['isAllowed'] = () => true,
 ) => {
   const calls: Call[] = [];
   const fullStore: BotStore = {
@@ -60,6 +61,7 @@ const setup = (
     botInfo,
     store: fullStore,
     addChannel: add,
+    isAllowed,
     appUrl: APP_URL,
     maxChannels: 3,
     log: (line) => lines.push(line),
@@ -119,6 +121,23 @@ describe('createBot', () => {
     expect(reply?.payload.text).toBe('📰 Подписка – ваша личная газета из Telegram-каналов.');
     expect(reply?.payload.parse_mode).toBeUndefined();
     expect(webAppUrl(reply)).toBe(APP_URL);
+  });
+
+  it('refuses strangers on a private instance: notice only, no user, no channel', async () => {
+    const isAllowed = vi.fn(() => false);
+    const { bot, calls, store, add } = setup(undefined, {}, undefined, isAllowed);
+    await bot.handleUpdate(
+      privateMessage({ text: '/start', entities: [{ type: 'bot_command', offset: 0, length: 6 }] }),
+    );
+    await bot.handleUpdate(forwardFrom('toporlive'));
+    expect(isAllowed).toHaveBeenCalledWith(from.id);
+    expect(store.upsertUser).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
+    const texts_ = replies(calls).map((call) => call.payload.text);
+    expect(texts_).toEqual([texts.privateInstance, texts.privateInstance]);
+    expect(texts.privateInstance).toContain('частный экземпляр Подписки');
+    expect(texts.privateInstance).toContain('https://github.com/andreykolokhmatov/podpiska');
+    expect(texts.privateInstance).not.toContain('—');
   });
 
   it('adds a channel from a forwarded post', async () => {

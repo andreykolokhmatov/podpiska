@@ -19,6 +19,7 @@
     "format:check": "prettier --check . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "release": "tsx src/deploy/release.ts",
     "collect": "tsx src/collector/cli.ts",
     "issue": "tsx src/pipeline/cli.ts",
     "llm:smoke": "tsx src/llm/smoke.ts",

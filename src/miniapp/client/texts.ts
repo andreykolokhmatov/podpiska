@@ -11,7 +11,11 @@ import {
 /** Client-only failure: fetch rejected or the response was not the contract's JSON. */
 export type ClientErrorCode = ApiErrorCode | 'network';
 
-export const BOT_URL = 'https://t.me/podpiska_news_bot';
+/** Same repo as SOURCE_URL in src/bot/texts.ts; duplicated so client code stays off bot modules. */
+export const SOURCE_URL = 'https://github.com/andreykolokhmatov/podpiska';
+
+/** Bot usernames come from GET /api/public/bot: each self-hosted instance has its own bot. */
+export const botUrl = (username: string): string => `https://t.me/${username}`;
 
 const restart = 'Закройте и откройте приложение заново.';
 
@@ -33,6 +37,7 @@ export const apiErrorText: Record<ClientErrorCode, string> = {
   retry_later: botTexts.retryLater,
   misconfigured: 'Сервис настроен не до конца. Попробуйте позже.',
   internal: botTexts.failure,
+  private_instance: 'Это частный экземпляр Подписки – пользоваться им может только его владелец.',
   cannot_message:
     'Бот не может вам написать. Откройте чат с ботом, нажмите «Старт» и попробуйте ещё раз.',
   network: 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.',
@@ -89,7 +94,12 @@ export const t = {
   outside: {
     title: 'Откройте в Telegram',
     text: 'Подписка работает внутри Telegram: там она собирает газету из ваших каналов.',
-    button: 'Открыть @podpiska_news_bot',
+    button: (username: string) => `Открыть @${username}`,
+  },
+  privateInstance: {
+    title: 'Это частный экземпляр',
+    text: 'Подпиской на этом боте пользуется только его владелец. Свою можно поднять бесплатно за 10 минут.',
+    button: 'Как поднять свою',
   },
   loadFailed: 'Не удалось загрузить',
   retry: 'Повторить',

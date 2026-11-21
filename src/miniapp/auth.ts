@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { parse } from '@tma.js/init-data-node';
 
+import { isAllowedUser, type AccessPolicy } from '@/lib/env';
+
 import { AUTH_SCHEME } from './contract';
 
 /** initData older than this is refused as expired (the client asks to restart the app). */
@@ -101,3 +103,10 @@ export function verifyInitData(raw: string, options: VerifyOptions): AuthResult 
 /** Owner rights only for initData signed by the prod bot. */
 export const isOwner = (auth: MiniAppAuth, ownerId: number | undefined): boolean =>
   auth.bot === 'prod' && ownerId !== undefined && auth.user.id === ownerId;
+
+/**
+ * The instance gate, checked right after initData validation: a public instance admits
+ * everyone; a private one only OWNER_TELEGRAM_ID ∪ ALLOWED_TELEGRAM_IDS (whichever bot signed).
+ */
+export const isAllowed = (auth: MiniAppAuth, policy: AccessPolicy): boolean =>
+  isAllowedUser(policy, auth.user.id);

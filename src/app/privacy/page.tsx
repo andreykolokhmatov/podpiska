@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 
 import { parseTheme } from '../issue/theme';
+import { getPrivacyInfo, type PrivacyInfo } from '@/lib/privacy';
 import { MiniAppBridge } from '@/miniapp/client/MiniAppBridge';
 
 export const metadata: Metadata = {
@@ -14,7 +15,15 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-const DELETION_CONTACT = 'andrei_working';
+// Contact and LLM route come from this instance's env at request time, never from the build.
+export const dynamic = 'force-dynamic';
+
+function llmRouteText(llm: PrivacyInfo['llm']): string {
+  if (llm.kind === 'direct') return 'напрямую в Google Gemini API';
+  return llm.host === null
+    ? 'в языковую модель Google Gemini через прокси-сервис'
+    : `в языковую модель Google Gemini через прокси ${llm.host}`;
+}
 
 interface PrivacyPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -42,6 +51,7 @@ html,html *{scrollbar-width:none}
 
 export default async function PrivacyPage({ searchParams }: PrivacyPageProps) {
   const theme = parseTheme((await searchParams).theme);
+  const { contact, llm } = getPrivacyInfo();
   return (
     <div className="pv" data-theme={theme}>
       <style>{CSS}</style>
@@ -70,8 +80,10 @@ export default async function PrivacyPage({ searchParams }: PrivacyPageProps) {
         <h2>Куда уходят данные</h2>
         <ul>
           <li>
-            Текст ваших интересов и публичные посты выбранных каналов отправляются в языковую модель
-            Google Gemini через сервис ProxyAPI, чтобы отобрать и пересказать новости.
+            Текст ваших интересов и публичные посты выбранных каналов отправляются{' '}
+            {llmRouteText(llm)}, чтобы отобрать и пересказать новости. Если экземпляр использует
+            бесплатный ключ Google AI Studio, Google может использовать эти данные для улучшения
+            своих моделей.
           </li>
           <li>
             Ваш IP-адрес видит только хостинг (Vercel), на котором работает сервис. Мы его не
@@ -94,10 +106,17 @@ export default async function PrivacyPage({ searchParams }: PrivacyPageProps) {
           архиве: после удаления газета больше не открывается ни у вас, ни по ссылке. Автоматическую
           сборку можно выключить в разделе «Следующий выпуск».
         </p>
-        <p>
-          Чтобы удалить все данные о себе целиком, напишите{' '}
-          <a href={`https://t.me/${DELETION_CONTACT}`}>@{DELETION_CONTACT}</a>.
-        </p>
+        {contact === null ? (
+          <p>
+            Чтобы удалить все данные о себе целиком, напишите владельцу бота, через который вы
+            пользуетесь Подпиской: этот экземпляр сервиса и все данные в нём принадлежат ему.
+          </p>
+        ) : (
+          <p>
+            Чтобы удалить все данные о себе целиком, напишите{' '}
+            <a href={contact.href}>{contact.label}</a>.
+          </p>
+        )}
 
         <hr />
         <p className="muted">

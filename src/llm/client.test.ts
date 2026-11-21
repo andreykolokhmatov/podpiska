@@ -22,6 +22,7 @@ describe('createLlm', () => {
       LLM_PROVIDER: 'google',
       LLM_MODEL_FAST: 'gemini-fast',
       LLM_MODEL_SMART: 'gemini-smart',
+      LLM_CONCURRENCY: 3,
       LLM_BASE_URL: 'https://proxy.example/google/v1beta',
       GOOGLE_GENERATIVE_AI_API_KEY: 'test-key',
     });
@@ -56,6 +57,7 @@ describe('createLlm', () => {
         LLM_PROVIDER: 'google',
         LLM_MODEL_FAST: 'a',
         LLM_MODEL_SMART: 'b',
+        LLM_CONCURRENCY: 3,
         LLM_BASE_URL: undefined,
         GOOGLE_GENERATIVE_AI_API_KEY: undefined,
       }),

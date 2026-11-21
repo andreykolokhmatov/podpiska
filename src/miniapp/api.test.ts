@@ -380,6 +380,8 @@ const setup = (
     TELEGRAM_BOT_TOKEN: PROD,
     TELEGRAM_DEV_BOT_TOKEN: DEV,
     OWNER_TELEGRAM_ID: OWNER,
+    PUBLIC: true,
+    ALLOWED_TELEGRAM_IDS: [],
     MAX_CHANNELS_PER_USER: 50,
     MAX_BUILDS_PER_DAY_GLOBAL: 30,
     MAX_CHANNEL_LOOKUPS_PER_DAY: 300,
@@ -519,6 +521,97 @@ describe('auth on every route', () => {
     const logged = lines.join('\n');
     expect(logged).not.toContain(raw.slice(0, 40));
     expect(logged).not.toContain('hash=');
+  });
+});
+
+describe('private instance gate', () => {
+  const privateEnv = { PUBLIC: false, ALLOWED_TELEGRAM_IDS: [77] };
+
+  it('answers 403 private_instance on every app route but GET issue to a stranger, storing nothing', async () => {
+    const { api, store } = setup({ env: privateEnv });
+    const auth = `tma ${initData({ id: 42 })}`;
+    const results = await Promise.all([
+      api.me(req('GET', '/api/app/me', { auth })),
+      api.onboarding(req('POST', '/api/app/onboarding', { auth })),
+      api.addChannel(req('POST', '/api/app/channels', { auth, body: { input: '@a' } })),
+      api.buildIssue(req('POST', '/api/app/issues', { auth })),
+      api.shareIssue(req('POST', `/api/app/issues/${UUID(1)}/share`, { auth }), UUID(1)),
+      api.getSchedule(req('GET', '/api/app/schedule', { auth })),
+    ]);
+    for (const res of results) {
+      expect(res.status).toBe(403);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(await res.json()).toEqual({ error: 'private_instance' });
+    }
+    expect(store.users.size).toBe(0);
+  });
+
+  it('lets a stranger open a shared issue like any non-owner: 404, nothing stored or marked', async () => {
+    const { api, store } = setup({ env: privateEnv });
+    const ownerAuth = `tma ${initData({ id: OWNER })}`;
+    await api.me(req('GET', '/api/app/me', { auth: ownerAuth }));
+    const issue = store.add(1, { status: 'ready', number: 1 });
+
+    const stranger = `tma ${initData({ id: 42 })}`;
+    const res = await api.getIssue(
+      req('GET', `/api/app/issues/${issue.id}`, { auth: stranger }),
+      issue.id,
+    );
+    expect(res.status).toBe(404);
+    expect(await errorOf(res)).toBe('not_found');
+    expect(store.users.size).toBe(1);
+    expect(store.opened).toEqual([]);
+    const meRes = await api.me(req('GET', '/api/app/me', { auth: stranger }));
+    expect(meRes.status).toBe(403);
+
+    const bad = await api.getIssue(
+      req('GET', `/api/app/issues/${issue.id}`, {
+        auth: `tma ${initData({ id: 42, token: '333:other' })}`,
+      }),
+      issue.id,
+    );
+    expect(bad.status).toBe(401);
+
+    const own = await api.getIssue(
+      req('GET', `/api/app/issues/${issue.id}`, { auth: ownerAuth }),
+      issue.id,
+    );
+    expect(own.status).toBe(200);
+    expect(store.opened).toEqual([issue.id]);
+  });
+
+  it('admits the owner (any signing bot) and the allowlist', async () => {
+    const { api } = setup({ env: privateEnv });
+    const owner = await api.me(
+      req('GET', '/api/app/me', { auth: `tma ${initData({ id: OWNER })}` }),
+    );
+    const ownerViaDev = await api.me(
+      req('GET', '/api/app/me', { auth: `tma ${initData({ id: OWNER, token: DEV })}` }),
+    );
+    const friend = await api.me(req('GET', '/api/app/me', { auth: `tma ${initData({ id: 77 })}` }));
+    expect([owner.status, ownerViaDev.status, friend.status]).toEqual([200, 200, 200]);
+  });
+
+  it('still answers 401 before 403 for a bad signature', async () => {
+    const { api } = setup({ env: privateEnv });
+    const res = await api.me(
+      req('GET', '/api/app/me', { auth: `tma ${initData({ token: '333:other' })}` }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('opens to everyone with PUBLIC', async () => {
+    const { api } = setup({ env: { PUBLIC: true, ALLOWED_TELEGRAM_IDS: [] } });
+    const res = await api.me(req('GET', '/api/app/me', { auth: `tma ${initData({ id: 5 })}` }));
+    expect(res.status).toBe(200);
+  });
+
+  it('answers 500 misconfigured for a private instance without an owner', async () => {
+    const { api, lines } = setup({ env: { PUBLIC: false, OWNER_TELEGRAM_ID: undefined } });
+    const res = await api.me(req('GET', '/api/app/me'));
+    expect(res.status).toBe(500);
+    expect(await errorOf(res)).toBe('misconfigured');
+    expect(lines.join()).toContain('OWNER_TELEGRAM_ID');
   });
 });
 
@@ -1539,8 +1632,18 @@ describe('POST /api/app/channels/resolve', () => {
     );
     expect(body).toEqual({
       results: [
-        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: '/api/avatars/econnews' },
-        { username: 'econnews', status: 'found', title: 'Эконом', avatarUrl: '/api/avatars/econnews' },
+        {
+          username: 'econnews',
+          status: 'found',
+          title: 'Эконом',
+          avatarUrl: '/api/avatars/econnews',
+        },
+        {
+          username: 'econnews',
+          status: 'found',
+          title: 'Эконом',
+          avatarUrl: '/api/avatars/econnews',
+        },
         { username: 'somebot', status: 'bot' },
         { username: 't.me/+invite', status: 'private' },
         { username: 'a b', status: 'invalid' },
