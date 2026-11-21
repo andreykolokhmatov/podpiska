@@ -10,6 +10,7 @@ import { issueSchema, POST_URL_RE, type Issue as IssueDoc } from '@/pipeline/sch
 import referenceJson from './__fixtures__/reference-issue.json';
 import sampleJson from './__fixtures__/sample-issue.json';
 import { sparseIssues } from './__fixtures__/sparse-issue';
+import { FIXTURE_NAMES, loadFixture } from './fixtures';
 import { Newspaper, type NewspaperTheme } from './Newspaper';
 
 const sample = issueSchema.parse(sampleJson);
@@ -223,6 +224,41 @@ describe('promo plate', () => {
   it.each([undefined, null])('has no plate when promo is %s', (promo) => {
     const $ = load(renderToStaticMarkup(<Newspaper issue={sample} promo={promo} />));
     expect($('.promo')).toHaveLength(0);
+  });
+});
+
+describe('upstream credit', () => {
+  const credit = { url: 'https://github.com/andreykolokhmatov/podpiska' };
+  const promo = { botUsername: 'podpiska_news_bot', url: 'https://t.me/podpiska_news_bot' };
+
+  it('renders a small external link in the footer', () => {
+    const $ = load(renderToStaticMarkup(<Newspaper issue={sample} credit={credit} />));
+    const link = $('footer a.credit');
+    expect(link).toHaveLength(1);
+    expect(link.attr('href')).toBe(credit.url);
+    expect(link.attr('target')).toBe('_blank');
+    expect(link.attr('rel')).toContain('noopener');
+    expect(link.text()).toBe('Сделано на Подписке · открытый код на GitHub');
+    expect($('.promo')).toHaveLength(0);
+  });
+
+  it.each([undefined, null])('is hidden when credit is %s', (value) => {
+    const $ = load(renderToStaticMarkup(<Newspaper issue={sample} promo={promo} credit={value} />));
+    expect($('.credit')).toHaveLength(0);
+    expect($('footer a.promo')).toHaveLength(1);
+  });
+
+  it('renders alongside the promo plate', () => {
+    const $ = load(
+      renderToStaticMarkup(<Newspaper issue={sample} promo={promo} credit={credit} />),
+    );
+    expect($('footer a.promo')).toHaveLength(1);
+    expect($('footer a.credit')).toHaveLength(1);
+  });
+
+  it.each(FIXTURE_NAMES)('renders on the /issue/preview %s fixture', (name) => {
+    const $ = load(renderToStaticMarkup(<Newspaper issue={loadFixture(name)} credit={credit} />));
+    expect($('footer a.credit')).toHaveLength(1);
   });
 });
 

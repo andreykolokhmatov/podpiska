@@ -1,7 +1,7 @@
 import type { Issue as IssueDoc } from '@/pipeline/schema';
 
 import { Byline } from './Byline';
-import type { NewspaperPromo } from './promo';
+import type { NewspaperCredit, NewspaperPromo } from './promo';
 import { countLine, effectiveLayout, splitFeatureStories, unitKey, visibleFacts } from './format';
 
 type Lead = IssueDoc['lead'];
@@ -267,9 +267,10 @@ interface ColophonProps {
   text: string;
   number: number;
   promo?: NewspaperPromo | null | undefined;
+  credit?: NewspaperCredit | null | undefined;
 }
 
-export function Colophon({ text, number, promo }: ColophonProps) {
+export function Colophon({ text, number, promo, credit }: ColophonProps) {
   return (
     <footer>
       <div className="colophon">{text}</div>
@@ -284,6 +285,11 @@ export function Colophon({ text, number, promo }: ColophonProps) {
         >
           <span className="promo__lead">Соберите свою газету</span>{' '}
           <span className="promo__bot">→ @{promo.botUsername}</span>
+        </a>
+      ) : null}
+      {credit ? (
+        <a className="credit" href={credit.url} target="_blank" rel="noopener noreferrer">
+          Сделано на Подписке · открытый код на GitHub
         </a>
       ) : null}
     </footer>

@@ -13,7 +13,7 @@ import {
   SideSection,
 } from './blocks';
 import { isSectionEmpty, normalizeIssueDashes } from './format';
-import type { NewspaperPromo } from './promo';
+import type { NewspaperCredit, NewspaperPromo } from './promo';
 
 export type NewspaperTheme = 'light' | 'dark';
 
@@ -23,10 +23,12 @@ interface NewspaperProps {
   theme?: NewspaperTheme | undefined;
   /** «Соберите свою газету» plate under the colophon; null/undefined = no plate (self-host). */
   promo?: NewspaperPromo | null | undefined;
+  /** Upstream «Сделано на Подписке» line at the very bottom; null/undefined = hidden. */
+  credit?: NewspaperCredit | null | undefined;
 }
 
 /** The whole issue as static markup: slots are placed by class, mobile order comes from CSS. */
-export function Newspaper({ issue: raw, theme, promo }: NewspaperProps) {
+export function Newspaper({ issue: raw, theme, promo, credit }: NewspaperProps) {
   const issue = normalizeIssueDashes(raw);
   const briefs = issue.briefs ?? [];
   const curiosities = issue.curiosities ?? [];
@@ -69,7 +71,12 @@ export function Newspaper({ issue: raw, theme, promo }: NewspaperProps) {
           ) : null}
           {events.length > 0 ? <Events events={events} /> : null}
         </main>
-        <Colophon text={issue.colophon} number={issue.masthead.number} promo={promo} />
+        <Colophon
+          text={issue.colophon}
+          number={issue.masthead.number}
+          promo={promo}
+          credit={credit}
+        />
       </div>
     </div>
   );

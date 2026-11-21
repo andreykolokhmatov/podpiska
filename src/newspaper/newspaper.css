@@ -543,6 +543,26 @@ html:has(.np[data-theme='light']) {
   }
 }
 
+.np .credit {
+  display: block;
+  width: fit-content;
+  margin: 18px auto 0;
+  font-family: var(--f-old);
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--muted);
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .np .credit:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+}
+
 /* owner's share/PDF trigger, added by the Mini App bridge */
 .np .np-fab {
   position: fixed;

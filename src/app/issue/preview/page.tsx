@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { isFixtureName, loadFixture } from '@/newspaper/fixtures';
 import { Newspaper } from '@/newspaper/Newspaper';
-import type { NewspaperPromo } from '@/newspaper/promo';
+import { type NewspaperPromo, UPSTREAM_REPO_URL } from '@/newspaper/promo';
 
 import { parseTheme } from '../theme';
 
@@ -24,7 +24,7 @@ interface PreviewPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-/** Dev-only fixture preview: /issue/preview?fixture=sample|reference|sparse&theme=light|dark&promo=0. */
+/** Dev-only fixture preview: /issue/preview?fixture=sample|reference|sparse&theme=light|dark&promo=0&credit=0. */
 export default async function PreviewPage({ searchParams }: PreviewPageProps) {
   if (process.env.NODE_ENV !== 'development') notFound();
   const query = await searchParams;
@@ -35,6 +35,7 @@ export default async function PreviewPage({ searchParams }: PreviewPageProps) {
       issue={loadFixture(name)}
       theme={parseTheme(query.theme)}
       promo={query.promo === '0' ? null : SAMPLE_PROMO}
+      credit={query.credit === '0' ? null : { url: UPSTREAM_REPO_URL }}
     />
   );
 }

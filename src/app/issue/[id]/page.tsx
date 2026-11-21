@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { loadIssueView } from '@/newspaper/load';
 import { Newspaper } from '@/newspaper/Newspaper';
-import { newspaperPromo } from '@/newspaper/promo';
+import { newspaperCredit, newspaperPromo } from '@/newspaper/promo';
 import { STATUS_COPY, StatusPage } from '@/newspaper/StatusPage';
 
 import { parseTheme } from '../theme';
@@ -43,7 +43,14 @@ export default async function IssuePage({ params, searchParams }: IssuePageProps
     case 'not-found':
       notFound();
     case 'ready':
-      return <Newspaper issue={view.issue} theme={theme} promo={newspaperPromo()} />;
+      return (
+        <Newspaper
+          issue={view.issue}
+          theme={theme}
+          promo={newspaperPromo()}
+          credit={newspaperCredit()}
+        />
+      );
     default:
       return <StatusPage {...STATUS_COPY[view.kind]} theme={theme} />;
   }
